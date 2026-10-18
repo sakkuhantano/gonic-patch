@@ -57,9 +57,25 @@ func waitForAlbumPath(t *testing.T, dbc *db.DB, path string) {
 	t.Fatalf("watcher did not create/update album path %q", path)
 }
 
+func waitForAlbumPathAbsent(t *testing.T, dbc *db.DB, path string) {
+	t.Helper()
+	deadline := time.Now().Add(25 * time.Second)
+	for time.Now().Before(deadline) {
+		var count int
+		require.NoError(t, dbc.Model(&db.Album{}).Where("right_path = ?", path).Count(&count).Error)
+		if count == 0 {
+			return
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	var count int
+	require.NoError(t, dbc.Model(&db.Album{}).Where("right_path = ?", path).Count(&count).Error)
+	t.Fatalf("watcher left stale album path %q in database; count=%d", path, count)
+}
+
 func TestPatchedWatcherCreateDeleteRenameAndCleanup(t *testing.T) {
 	m := mockfs.New(t)
-	m.SetTrack("artist-a/album-a/one.flac", func(info *mockfs.TagInfo) {
+	m.SetTrack("artist-a/album-a/one.mp3", func(info *mockfs.TagInfo) {
 		normtag.Set(info.Tags, normtag.Artist, "artist-a")
 		normtag.Set(info.Tags, normtag.AlbumArtist, "artist-a")
 		normtag.Set(info.Tags, normtag.Album, "album-a")
@@ -85,7 +101,7 @@ func TestPatchedWatcherCreateDeleteRenameAndCleanup(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 
 	// A new MP3-like file should update only its containing album.
-	m.SetTrack("artist-a/album-a/two.flac", func(info *mockfs.TagInfo) {
+	m.SetTrack("artist-a/album-a/two.mp3", func(info *mockfs.TagInfo) {
 		normtag.Set(info.Tags, normtag.Artist, "artist-a")
 		normtag.Set(info.Tags, normtag.AlbumArtist, "artist-a")
 		normtag.Set(info.Tags, normtag.Album, "album-a")
@@ -94,7 +110,7 @@ func TestPatchedWatcherCreateDeleteRenameAndCleanup(t *testing.T) {
 	waitForTrackCount(t, m.DB(), 2)
 
 	// Removing one track must remove its database row.
-	require.NoError(t, os.Remove(filepath.Join(m.TmpDir(), "artist-a/album-a/two.flac")))
+	require.NoError(t, os.Remove(filepath.Join(m.TmpDir(), "artist-a/album-a/two.mp3")))
 	waitForTrackCount(t, m.DB(), 1)
 
 	// NAS thumbnail/index directories must not become albums or trigger rescans.
@@ -109,7 +125,7 @@ func TestPatchedWatcherCreateDeleteRenameAndCleanup(t *testing.T) {
 	require.Zero(t, metadataAlbums, "thumbnail metadata directories must not be indexed as albums")
 
 	// Creating and deleting a whole album directory must update the database.
-	m.SetTrack("artist-a/new-album/three.flac", func(info *mockfs.TagInfo) {
+	m.SetTrack("artist-a/new-album/three.mp3", func(info *mockfs.TagInfo) {
 		normtag.Set(info.Tags, normtag.Artist, "artist-a")
 		normtag.Set(info.Tags, normtag.AlbumArtist, "artist-a")
 		normtag.Set(info.Tags, normtag.Album, "new-album")
@@ -125,13 +141,14 @@ func TestPatchedWatcherCreateDeleteRenameAndCleanup(t *testing.T) {
 		filepath.Join(m.TmpDir(), "artist-a/album-renamed"),
 	))
 	// The mock tag reader is keyed by absolute path; re-register the moved file.
-	m.SetTrack("artist-a/album-renamed/one.flac", func(info *mockfs.TagInfo) {
+	m.SetTrack("artist-a/album-renamed/one.mp3", func(info *mockfs.TagInfo) {
 		normtag.Set(info.Tags, normtag.Artist, "artist-a")
 		normtag.Set(info.Tags, normtag.AlbumArtist, "artist-a")
 		normtag.Set(info.Tags, normtag.Album, "album-a")
 		normtag.Set(info.Tags, normtag.Title, "one")
 	})
 	waitForAlbumPath(t, m.DB(), "album-renamed")
+	waitForAlbumPathAbsent(t, m.DB(), "album-a")
 	waitForTrackCount(t, m.DB(), 1)
 	var renamed db.Album
 	require.NoError(t, m.DB().Where("right_path = ?", "album-renamed").First(&renamed).Error)
