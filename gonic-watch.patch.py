@@ -434,5 +434,9 @@ if re.search(r"\bScanAndClean\s*\(", watch_without_comments):
 if "filepath.WalkDir(child" in watch:
     fail("Rescan must not recursively walk child folders")
 
+# Guard against reintroducing a full-library album query during Remove/Rename.
+if 's.db.Where("root_dir = ?", musicDir).Find(&albums)' not in patched:
+    fail("Removed-path cleanup must query only the affected music root")
+
 print("Patch applied; gofmt and static verifier checks passed.")
 print("This script does not claim that a Docker build or runtime test passed.")
