@@ -440,6 +440,7 @@ required = [
     "os.ReadDir(child)",
     "cleanWatchTracks",
     "musicDirRelative",
+    "isWatchMetadataPath",
 ]
 for token in required:
     if token not in watch:
