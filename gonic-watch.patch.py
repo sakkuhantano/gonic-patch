@@ -50,6 +50,12 @@ new_code = r'''func (s *Scanner) ExecuteWatch(ctx context.Context) error {
 			if walkErr != nil {
 				return walkErr
 			}
+			if isWatchMetadataPath(path) {
+				if d.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
 
 			if d.IsDir() {
 				cleanPath := filepath.Clean(path)
@@ -138,7 +144,7 @@ new_code = r'''func (s *Scanner) ExecuteWatch(ctx context.Context) error {
 				}
 
 				for _, item := range items {
-					if !item.IsDir() {
+					if !item.IsDir() || isWatchMetadataPath(item.Name()) {
 						continue
 					}
 
@@ -235,6 +241,9 @@ new_code = r'''func (s *Scanner) ExecuteWatch(ctx context.Context) error {
 				return nil
 			}
 			path := filepath.Clean(event.Name)
+			if isWatchMetadataPath(path) {
+				continue
+			}
             //log.Printf("WATCH EVENT name=%q op=%s", path, event.Op.String())
 
 			if event.Op&(fsnotify.Remove|fsnotify.Rename) != 0 {
@@ -271,6 +280,16 @@ new_code = r'''func (s *Scanner) ExecuteWatch(ctx context.Context) error {
 			return nil
 		}
 	}
+}
+
+// isWatchMetadataPath filters NAS thumbnail/index directories from watcher work.
+func isWatchMetadataPath(path string) bool {
+	for _, part := range strings.Split(filepath.Clean(path), string(filepath.Separator)) {
+		if part == "@eaDir" || strings.HasPrefix(part, ".@__thumb") {
+			return true
+		}
+	}
+	return false
 }
 
 // cleanWatchTracks removes missing tracks from exactly one album folder.
@@ -331,8 +350,11 @@ func (s *Scanner) cleanWatchRemovedPath(removed string) error {
 		return nil
 	}
 
+	// Restrict the candidate set to the configured music root. Querying every
+	// album in the library for each Remove/Rename event scales poorly as the
+	// library grows and needlessly touches unrelated roots.
 	var albums []db.Album
-	if err := s.db.Find(&albums).Error; err != nil {
+	if err := s.db.Where("root_dir = ?", musicDir).Find(&albums).Error; err != nil {
 		return err
 	}
 
@@ -418,6 +440,7 @@ required = [
     "os.ReadDir(child)",
     "cleanWatchTracks",
     "musicDirRelative",
+    "isWatchMetadataPath",
 ]
 for token in required:
     if token not in watch:
@@ -430,6 +453,10 @@ if re.search(r"\bScanAndClean\s*\(", watch_without_comments):
     fail("ExecuteWatch must not call global ScanAndClean()")
 if "filepath.WalkDir(child" in watch:
     fail("Rescan must not recursively walk child folders")
+
+# Guard against reintroducing a full-library album query during Remove/Rename.
+if 's.db.Where("root_dir = ?", musicDir).Find(&albums)' not in patched:
+    fail("Removed-path cleanup must query only the affected music root")
 
 print("Patch applied; gofmt and static verifier checks passed.")
 print("This script does not claim that a Docker build or runtime test passed.")

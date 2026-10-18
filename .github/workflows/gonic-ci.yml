@@ -1,0 +1,31 @@
+name: Build and test gonic patch
+
+on:
+  push:
+    branches:
+      - "fix/**"
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: gonic-ci-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Build patched gonic image
+        run: docker build --pull --file Dockerfile.gonic --tag gonic-patch-ci:latest .
+
+      - name: Smoke-test gonic binary
+        run: docker run --rm gonic-patch-ci:latest /usr/local/bin/gonic --help
