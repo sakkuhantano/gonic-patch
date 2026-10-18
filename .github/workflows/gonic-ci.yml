@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: gonic-ci-${{ github.event.pull_request.head.ref || github.ref }}
+  group: gonic-ci-${{ github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: true
 
 permissions:
