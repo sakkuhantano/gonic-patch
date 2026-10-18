@@ -108,6 +108,17 @@ func TestPatchedWatcherCreateDeleteRenameAndCleanup(t *testing.T) {
 	require.NoError(t, m.DB().Model(&db.Album{}).Where("right_path IN (?)", []string{"@eaDir", ".@__thumb"}).Count(&metadataAlbums).Error)
 	require.Zero(t, metadataAlbums, "thumbnail metadata directories must not be indexed as albums")
 
+	// Creating and deleting a whole album directory must update the database.
+	m.SetTrack("artist-a/new-album/three.flac", func(info *mockfs.TagInfo) {
+		normtag.Set(info.Tags, normtag.Artist, "artist-a")
+		normtag.Set(info.Tags, normtag.AlbumArtist, "artist-a")
+		normtag.Set(info.Tags, normtag.Album, "new-album")
+		normtag.Set(info.Tags, normtag.Title, "three")
+	})
+	waitForTrackCount(t, m.DB(), 2)
+	require.NoError(t, os.RemoveAll(filepath.Join(m.TmpDir(), "artist-a/new-album")))
+	waitForTrackCount(t, m.DB(), 1)
+
 	// Renaming an album directory must preserve its track and update its path.
 	require.NoError(t, os.Rename(
 		filepath.Join(m.TmpDir(), "artist-a/album-a"),
