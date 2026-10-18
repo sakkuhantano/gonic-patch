@@ -1,0 +1,125 @@
+# ============================================================
+# GONIC BUILDER
+# ============================================================
+FROM golang:1.26-bookworm AS gonic-builder
+
+ARG GONIC_VERSION=v0.22.0
+
+WORKDIR /src
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    python3 \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# ------------------------------------------------------------
+# Clone gonic
+# ------------------------------------------------------------
+RUN git clone \
+    --branch ${GONIC_VERSION} \
+    --depth 1 \
+    https://github.com/sentriz/gonic.git .
+
+# ------------------------------------------------------------
+# Go dependencies
+# ------------------------------------------------------------
+RUN --mount=type=cache,id=gonic-go-mod,target=/go/pkg/mod \
+    --mount=type=cache,id=gonic-go-build,target=/root/.cache/go-build \
+    go mod download
+
+# ------------------------------------------------------------
+# Apply local gonic patches
+# ------------------------------------------------------------
+COPY gonic-watch.patch.py /tmp/gonic-watch.patch.py
+
+RUN python3 /tmp/gonic-watch.patch.py
+
+# ------------------------------------------------------------
+# Verify gonic watcher patch
+# ------------------------------------------------------------
+RUN python3 - <<'PY'
+from pathlib import Path
+
+src = Path("scanner/scanner.go").read_text()
+
+start = src.find("func (s *Scanner) ExecuteWatch")
+end = src.find("\nfunc watchCallback", start)
+
+if start < 0 or end < 0:
+    raise SystemExit("ERROR: ExecuteWatch() not found")
+
+watch = src[start:end]
+
+# The watcher must not perform a global library scan/cleanup.
+if "ScanAndClean(" in watch:
+    raise SystemExit(
+        "ERROR: ExecuteWatch() still contains global ScanAndClean()"
+    )
+
+# The watcher must group events by music root.
+if "batchRoots" not in watch:
+    raise SystemExit(
+        "ERROR: watcher patch missing batchRoots"
+    )
+
+# Removed/renamed paths must be tracked.
+if "batchRemoved" not in watch:
+    raise SystemExit(
+        "ERROR: watcher patch missing batchRemoved"
+    )
+
+# Rescan must enumerate only immediate children.
+if "os.ReadDir(root)" not in watch:
+    raise SystemExit(
+        "ERROR: watcher patch missing immediate-root scan"
+    )
+
+if "os.ReadDir(child)" not in watch:
+    raise SystemExit(
+        "ERROR: watcher patch missing child scan"
+    )
+
+# The rescan must not recursively WalkDir() from the affected child.
+rescan = watch[watch.find("case <-batchT.C:"):]
+
+if "filepath.WalkDir(child" in rescan:
+    raise SystemExit(
+        "ERROR: watcher rescan is recursively walking child directories"
+    )
+
+# Scoped cleanup must be used.
+if "cleanWatchTracks" not in watch:
+    raise SystemExit(
+        "ERROR: watcher patch missing cleanWatchTracks"
+    )
+
+# Events must resolve through the configured music roots.
+if "musicDirRelative" not in watch:
+    raise SystemExit(
+        "ERROR: watcher patch missing musicDirRelative"
+    )
+
+print("gonic watcher verification: OK")
+PY
+# ------------------------------------------------------------
+# Tests
+# ------------------------------------------------------------
+RUN --mount=type=cache,id=gonic-go-mod,target=/go/pkg/mod \
+    --mount=type=cache,id=gonic-go-build,target=/root/.cache/go-build \
+    go test ./scanner ./db
+
+# ------------------------------------------------------------
+# Build
+# ------------------------------------------------------------
+RUN --mount=type=cache,id=gonic-go-mod,target=/go/pkg/mod \
+    --mount=type=cache,id=gonic-go-build,target=/root/.cache/go-build \
+    CGO_ENABLED=0 go build \
+    -o /usr/local/bin/gonic \
+    ./cmd/gonic
+
+# ------------------------------------------------------------
+# Verify binary
+# ------------------------------------------------------------
+RUN ls -lh /usr/local/bin/gonic && \
+    /usr/local/bin/gonic --help >/dev/null
