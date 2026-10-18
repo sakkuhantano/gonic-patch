@@ -331,8 +331,11 @@ func (s *Scanner) cleanWatchRemovedPath(removed string) error {
 		return nil
 	}
 
+	// Restrict the candidate set to the configured music root. Querying every
+	// album in the library for each Remove/Rename event scales poorly as the
+	// library grows and needlessly touches unrelated roots.
 	var albums []db.Album
-	if err := s.db.Find(&albums).Error; err != nil {
+	if err := s.db.Where("root_dir = ?", musicDir).Find(&albums).Error; err != nil {
 		return err
 	}
 
