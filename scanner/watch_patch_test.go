@@ -97,6 +97,17 @@ func TestPatchedWatcherCreateDeleteRenameAndCleanup(t *testing.T) {
 	require.NoError(t, os.Remove(filepath.Join(m.TmpDir(), "artist-a/album-a/two.flac")))
 	waitForTrackCount(t, m.DB(), 1)
 
+	// NAS thumbnail/index directories must not become albums or trigger rescans.
+	for _, metadataDir := range []string{"@eaDir", ".@__thumb"} {
+		path := filepath.Join(m.TmpDir(), "artist-a/album-a", metadataDir)
+		require.NoError(t, os.MkdirAll(path, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(path, "thumb.jpg"), []byte("metadata"), 0o644))
+	}
+	time.Sleep(11 * time.Second)
+	var metadataAlbums int
+	require.NoError(t, m.DB().Model(&db.Album{}).Where("right_path IN (?)", []string{"@eaDir", ".@__thumb"}).Count(&metadataAlbums).Error)
+	require.Zero(t, metadataAlbums, "thumbnail metadata directories must not be indexed as albums")
+
 	// Renaming an album directory must preserve its track and update its path.
 	require.NoError(t, os.Rename(
 		filepath.Join(m.TmpDir(), "artist-a/album-a"),
