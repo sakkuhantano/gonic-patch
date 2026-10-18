@@ -34,7 +34,7 @@ from pathlib import Path
 
 src = Path("scanner/scanner.go").read_text()
 start = src.find("func (s *Scanner) ExecuteWatch")
-end = src.find("\\nfunc watchCallback", start)
+end = src.find("\nfunc watchCallback", start)
 
 if start < 0 or end < 0:
     raise SystemExit("ERROR: ExecuteWatch() not found")
