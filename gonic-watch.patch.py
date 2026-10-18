@@ -50,6 +50,12 @@ new_code = r'''func (s *Scanner) ExecuteWatch(ctx context.Context) error {
 			if walkErr != nil {
 				return walkErr
 			}
+			if isWatchMetadataPath(path) {
+				if d.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
 
 			if d.IsDir() {
 				cleanPath := filepath.Clean(path)
@@ -138,7 +144,7 @@ new_code = r'''func (s *Scanner) ExecuteWatch(ctx context.Context) error {
 				}
 
 				for _, item := range items {
-					if !item.IsDir() {
+					if !item.IsDir() || isWatchMetadataPath(item.Name()) {
 						continue
 					}
 
@@ -235,6 +241,9 @@ new_code = r'''func (s *Scanner) ExecuteWatch(ctx context.Context) error {
 				return nil
 			}
 			path := filepath.Clean(event.Name)
+			if isWatchMetadataPath(path) {
+				continue
+			}
             //log.Printf("WATCH EVENT name=%q op=%s", path, event.Op.String())
 
 			if event.Op&(fsnotify.Remove|fsnotify.Rename) != 0 {
@@ -271,6 +280,16 @@ new_code = r'''func (s *Scanner) ExecuteWatch(ctx context.Context) error {
 			return nil
 		}
 	}
+}
+
+// isWatchMetadataPath filters NAS thumbnail/index directories from watcher work.
+func isWatchMetadataPath(path string) bool {
+	for _, part := range strings.Split(filepath.Clean(path), string(filepath.Separator)) {
+		if part == "@eaDir" || strings.HasPrefix(part, ".@__thumb") {
+			return true
+		}
+	}
+	return false
 }
 
 // cleanWatchTracks removes missing tracks from exactly one album folder.
