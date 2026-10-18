@@ -26,6 +26,9 @@ RUN --mount=type=cache,id=gonic-go-mod,target=/go/pkg/mod \
 COPY gonic-watch.patch.py /tmp/gonic-watch.patch.py
 RUN python3 /tmp/gonic-watch.patch.py
 
+# Inject watcher regression tests into the pinned upstream source before go test.
+COPY scanner/watch_patch_test.go /src/scanner/watch_patch_test.go
+
 # ------------------------------------------------------------
 # Verify the patch invariants before compiling.
 # ------------------------------------------------------------
