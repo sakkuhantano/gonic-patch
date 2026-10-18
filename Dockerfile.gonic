@@ -94,6 +94,13 @@ if "cleanWatchTracks" not in watch:
         "ERROR: watcher patch missing cleanWatchTracks"
     )
 
+# Removed-path cleanup must be scoped to the affected music root, not the
+# entire library. This guards against accidental full-library DB scans.
+if 's.db.Where("root_dir = ?", musicDir).Find(&albums)' not in src:
+    raise SystemExit(
+        "ERROR: removed-path cleanup is not scoped to root_dir"
+    )
+
 # Events must resolve through the configured music roots.
 if "musicDirRelative" not in watch:
     raise SystemExit(
