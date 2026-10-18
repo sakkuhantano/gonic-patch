@@ -43,6 +43,20 @@ func waitForTrackCount(t *testing.T, dbc *db.DB, want int) {
 	t.Fatalf("watcher did not converge to %d tracks; got %d", want, got)
 }
 
+func waitForAlbumPath(t *testing.T, dbc *db.DB, path string) {
+	t.Helper()
+	deadline := time.Now().Add(25 * time.Second)
+	for time.Now().Before(deadline) {
+		var count int
+		require.NoError(t, dbc.Model(&db.Album{}).Where("right_path = ?", path).Count(&count).Error)
+		if count > 0 {
+			return
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	t.Fatalf("watcher did not create/update album path %q", path)
+}
+
 func TestPatchedWatcherCreateDeleteRenameAndCleanup(t *testing.T) {
 	m := mockfs.New(t)
 	m.SetTrack("artist-a/album-a/one.flac", func(info *mockfs.TagInfo) {
@@ -88,6 +102,7 @@ func TestPatchedWatcherCreateDeleteRenameAndCleanup(t *testing.T) {
 		filepath.Join(m.TmpDir(), "artist-a/album-a"),
 		filepath.Join(m.TmpDir(), "artist-a/album-renamed"),
 	))
+	waitForAlbumPath(t, m.DB(), "album-renamed")
 	waitForTrackCount(t, m.DB(), 1)
 	var renamed db.Album
 	require.NoError(t, m.DB().Where("right_path = ?", "album-renamed").First(&renamed).Error)
