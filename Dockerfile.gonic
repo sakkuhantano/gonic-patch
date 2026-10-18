@@ -13,120 +13,96 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# ------------------------------------------------------------
-# Clone gonic
-# ------------------------------------------------------------
+# Pin the source to the requested release tag.
 RUN git clone \
     --branch ${GONIC_VERSION} \
     --depth 1 \
     https://github.com/sentriz/gonic.git .
 
-# ------------------------------------------------------------
-# Go dependencies
-# ------------------------------------------------------------
 RUN --mount=type=cache,id=gonic-go-mod,target=/go/pkg/mod \
     --mount=type=cache,id=gonic-go-build,target=/root/.cache/go-build \
     go mod download
 
-# ------------------------------------------------------------
-# Apply local gonic patches
-# ------------------------------------------------------------
 COPY gonic-watch.patch.py /tmp/gonic-watch.patch.py
-
 RUN python3 /tmp/gonic-watch.patch.py
 
 # ------------------------------------------------------------
-# Verify gonic watcher patch
+# Verify the patch invariants before compiling.
 # ------------------------------------------------------------
 RUN python3 - <<'PY'
 from pathlib import Path
 
 src = Path("scanner/scanner.go").read_text()
-
 start = src.find("func (s *Scanner) ExecuteWatch")
-end = src.find("\nfunc watchCallback", start)
+end = src.find("\\nfunc watchCallback", start)
 
 if start < 0 or end < 0:
     raise SystemExit("ERROR: ExecuteWatch() not found")
 
 watch = src[start:end]
+checks = {
+    "no global ScanAndClean": "ScanAndClean(" not in watch,
+    "folder batching": "batchRoots" in watch,
+    "removed-path tracking": "batchRemoved" in watch,
+    "immediate-child enumeration": "os.ReadDir(root)" in watch,
+    "child read check": "os.ReadDir(child)" in watch,
+    "track cleanup": "cleanWatchTracks" in watch,
+    "music-root resolution": "musicDirRelative" in watch,
+    "no recursive child walk": "filepath.WalkDir(child" not in watch,
+    "removed-path cleanup": "cleanWatchRemovedPath" in watch,
+}
+failed = [name for name, passed in checks.items() if not passed]
+for name, passed in checks.items():
+    print(f'{"PASS" if passed else "FAIL"}: {name}')
+if failed:
+    raise SystemExit("Patch invariant check failed: " + ", ".join(failed))
 
-# The watcher must not perform a global library scan/cleanup.
-if "ScanAndClean(" in watch:
-    raise SystemExit(
-        "ERROR: ExecuteWatch() still contains global ScanAndClean()"
-    )
-
-# The watcher must group events by music root.
-if "batchRoots" not in watch:
-    raise SystemExit(
-        "ERROR: watcher patch missing batchRoots"
-    )
-
-# Removed/renamed paths must be tracked.
-if "batchRemoved" not in watch:
-    raise SystemExit(
-        "ERROR: watcher patch missing batchRemoved"
-    )
-
-# Rescan must enumerate only immediate children.
-if "os.ReadDir(root)" not in watch:
-    raise SystemExit(
-        "ERROR: watcher patch missing immediate-root scan"
-    )
-
-if "os.ReadDir(child)" not in watch:
-    raise SystemExit(
-        "ERROR: watcher patch missing child scan"
-    )
-
-# The rescan must not recursively WalkDir() from the affected child.
-rescan = watch[watch.find("case <-batchT.C:"):]
-
-if "filepath.WalkDir(child" in rescan:
-    raise SystemExit(
-        "ERROR: watcher rescan is recursively walking child directories"
-    )
-
-# Scoped cleanup must be used.
-if "cleanWatchTracks" not in watch:
-    raise SystemExit(
-        "ERROR: watcher patch missing cleanWatchTracks"
-    )
-
-# Removed-path cleanup must be scoped to the affected music root, not the
-# entire library. This guards against accidental full-library DB scans.
 if 's.db.Where("root_dir = ?", musicDir).Find(&albums)' not in src:
-    raise SystemExit(
-        "ERROR: removed-path cleanup is not scoped to root_dir"
-    )
-
-# Events must resolve through the configured music roots.
-if "musicDirRelative" not in watch:
-    raise SystemExit(
-        "ERROR: watcher patch missing musicDirRelative"
-    )
-
-print("gonic watcher verification: OK")
+    raise SystemExit("ERROR: removed-path cleanup is not scoped to root_dir")
 PY
-# ------------------------------------------------------------
-# Tests
-# ------------------------------------------------------------
+
+# Run the full repository test suite and static analysis, not only scanner/db.
 RUN --mount=type=cache,id=gonic-go-mod,target=/go/pkg/mod \
     --mount=type=cache,id=gonic-go-build,target=/root/.cache/go-build \
-    go test ./scanner ./db
+    go test ./...
 
-# ------------------------------------------------------------
-# Build
-# ------------------------------------------------------------
 RUN --mount=type=cache,id=gonic-go-mod,target=/go/pkg/mod \
     --mount=type=cache,id=gonic-go-build,target=/root/.cache/go-build \
-    CGO_ENABLED=0 go build \
-    -o /usr/local/bin/gonic \
-    ./cmd/gonic
+    go vet ./...
 
-# ------------------------------------------------------------
-# Verify binary
-# ------------------------------------------------------------
-RUN ls -lh /usr/local/bin/gonic && \
-    /usr/local/bin/gonic --help >/dev/null
+RUN --mount=type=cache,id=gonic-go-mod,target=/go/pkg/mod \
+    --mount=type=cache,id=gonic-go-build,target=/root/.cache/go-build \
+    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" \
+    -o /out/gonic ./cmd/gonic
+
+RUN /out/gonic --help >/dev/null
+
+# ============================================================
+# RUNTIME IMAGE
+# ============================================================
+FROM debian:bookworm-slim AS gonic-runtime
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    ffmpeg \
+    mpv \
+    tini \
+    tzdata \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /data /music /podcasts /cache /playlists
+
+COPY --from=gonic-builder /out/gonic /usr/local/bin/gonic
+
+ENV TZ="" \
+    GONIC_DB_PATH=/data/gonic.db \
+    GONIC_LISTEN_ADDR=:80 \
+    GONIC_MUSIC_PATH=/music \
+    GONIC_PODCAST_PATH=/podcasts \
+    GONIC_CACHE_PATH=/cache \
+    GONIC_PLAYLISTS_PATH=/playlists
+
+VOLUME ["/data", "/music", "/podcasts", "/cache", "/playlists"]
+EXPOSE 80
+
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["gonic"]
