@@ -124,6 +124,13 @@ func TestPatchedWatcherCreateDeleteRenameAndCleanup(t *testing.T) {
 		filepath.Join(m.TmpDir(), "artist-a/album-a"),
 		filepath.Join(m.TmpDir(), "artist-a/album-renamed"),
 	))
+	// The mock tag reader is keyed by absolute path; re-register the moved file.
+	m.SetTrack("artist-a/album-renamed/one.flac", func(info *mockfs.TagInfo) {
+		normtag.Set(info.Tags, normtag.Artist, "artist-a")
+		normtag.Set(info.Tags, normtag.AlbumArtist, "artist-a")
+		normtag.Set(info.Tags, normtag.Album, "album-a")
+		normtag.Set(info.Tags, normtag.Title, "one")
+	})
 	waitForAlbumPath(t, m.DB(), "album-renamed")
 	waitForTrackCount(t, m.DB(), 1)
 	var renamed db.Album
