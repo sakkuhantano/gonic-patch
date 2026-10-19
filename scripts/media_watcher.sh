@@ -10,7 +10,7 @@ MONITOR_DIRS=(
 )
 
 # Ignore Synology-generated metadata, thumbnails, and common OS sidecar files.
-EXCLUDE_RE='(^|/)(@eaDir|\.@thumb|\.@__thumb|@SynoResource|\.thumbnails|thumbnails|thumbs)(/|$)|(^|/)(SYNOPHOTO[^/]*|\.DS_Store|[Tt]humbs\.db|desktop\.ini|\._[^/]*|[^/]*\.(thumb|thumbnail))
+EXCLUDE_RE='(^|/)(@eaDir|\.@thumb|\.@__thumb|@SynoResource|\.thumbnails|thumbnails|thumbs)(/|$)|(^|/)(SYNOPHOTO[^/]*|\.DS_Store|[Tt]humbs\.db|desktop\.ini|\._[^/]*|[^/]*\.(thumb|thumbnail))$'
 
 EXISTING_DIRS=()
 
