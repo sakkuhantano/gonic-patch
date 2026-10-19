@@ -9,10 +9,7 @@ MONITOR_DIRS=(
     "/media/Photo"
 )
 
-# Ignore Synology-generated metadata, thumbnails, and common OS sidecar files.
-# Keep this filter shared by permission handling and indexing so ignored paths
-# never trigger either operation.
-EXCLUDE_RE='(^|/)(@eaDir|\.@thumb|\.@__thumb|@SynoResource|\.thumbnails|thumbnails|thumbs)(/|$)|(^|/)(SYNOPHOTO[^/]*|\.DS_Store|[Tt]humbs\.db|desktop\.ini|\._[^/]*|[^/]*\.(thumb|thumbnail))$'
+EXCLUDE_RE='(^|/)(@eaDir|\.@thumb|\.@__thumb)(/|$)|(^|/)(SYNOPHOTO[^/]*|\.DS_Store|Thumbs\.db)$'
 
 EXISTING_DIRS=()
 
@@ -59,13 +56,11 @@ trap cleanup EXIT
 trap 'exit 1' TERM INT HUP
 
 echo "[START] Filter metadata Synology aktif."
-echo "[START] Permission watcher memakai inotifywait yang sama; reindex tetap terpisah."
+echo "[START] Menjalankan satu inotifywait."
 
-# Keep one recursive inotifywait process. CLOSE_WRITE is included only so
-# permissions can be corrected after an application finishes writing a file.
 inotifywait -m -r \
     --exclude "$EXCLUDE_RE" \
-    -e create,moved_to,delete,close_write \
+    -e create,moved_to,delete \
     --format '%e|%w%f' \
     "${EXISTING_DIRS[@]}" > "$FIFO" &
 
@@ -83,31 +78,6 @@ while IFS='|' read -r event filepath; do
             continue
             ;;
     esac
-
-    # Permission handling is limited to the two bind-mounted 9P trees above.
-    # Do not follow symlinks and never chmod a path that was deleted.
-    if [[ "$event" != *DELETE* ]] &&
-       [[ "$event" == *CREATE* || "$event" == *MOVED_TO* || "$event" == *CLOSE_WRITE* ]]; then
-        if [[ -L "$filepath" ]]; then
-            :
-        elif [[ -d "$filepath" ]]; then
-            if ! chmod 777 -- "$filepath"; then
-                echo "[PERM-ERROR] chmod 777 gagal: $filepath" >&2
-            fi
-        elif [[ -f "$filepath" ]]; then
-            if ! chmod 666 -- "$filepath"; then
-                echo "[PERM-ERROR] chmod 666 gagal: $filepath" >&2
-            fi
-        fi
-    fi
-
-    # CLOSE_WRITE is permission-only. Do not invoke synoindex for this event:
-    # this avoids adding reindex work and preserves the existing indexing flow.
-    if [[ "$event" == *CLOSE_WRITE* &&
-          "$event" != *CREATE* &&
-          "$event" != *MOVED_TO* ]]; then
-        continue
-    fi
 
     IS_DIR=0
     if [[ "$event" == *ISDIR* ]]; then
@@ -149,3 +119,4 @@ RC=$?
 
 echo "[ERROR] inotifywait berhenti (exit=$RC)." >&2
 exit 1
+
