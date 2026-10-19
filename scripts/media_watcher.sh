@@ -108,16 +108,19 @@ while IFS='|' read -r event filepath; do
         fi
     fi
 
-    # CLOSE_WRITE is permission-only: keep the existing indexing behavior unchanged.
-    if [[ "$event" == *CLOSE_WRITE* &&
-          "$event" != *CREATE* &&
-          "$event" != *MOVED_TO* ]]; then
-        continue
-    fi
-
     IS_DIR=0
     if [[ "$event" == *ISDIR* ]]; then
         IS_DIR=1
+    fi
+
+    # A file's CREATE event can arrive before its contents have been written.
+    # Index files only after CLOSE_WRITE, or immediately when moved into the tree.
+    # Directories are indexed on CREATE/MOVED_TO so newly created folders are scanned.
+    if [[ "$event" != *DELETE* && "$IS_DIR" -eq 0 &&
+          "$event" == *CREATE* &&
+          "$event" != *MOVED_TO* &&
+          "$event" != *CLOSE_WRITE* ]]; then
+        continue
     fi
 
     if [[ "$event" == *DELETE* ]]; then
