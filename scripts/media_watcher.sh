@@ -7,6 +7,7 @@ DSM_SYNOINDEX="/usr/syno/bin/synoindex"
 MONITOR_DIRS=(
     "/media/Music"
     "/media/Photo"
+    "/surveillance"
 )
 
 # Ignore Synology-generated metadata, thumbnails, and common OS sidecar files.
@@ -75,6 +76,9 @@ while IFS='|' read -r event filepath; do
         /media/Photo/*)
             DSM_FILEPATH="/volume1/photo${filepath#/media/Photo}"
             ;;
+        /surveillance/*)
+            DSM_FILEPATH="/volume1/surveillance${filepath#/surveillance}"
+            ;;
         *)
             continue
             ;;
@@ -106,6 +110,12 @@ while IFS='|' read -r event filepath; do
                 echo "[PERM-ERROR] chmod 666 gagal: $filepath" >&2
             fi
         fi
+    fi
+
+    # Surveillance Station needs permission/ACL normalization only; do not index its files.
+    if [[ "$filepath" == /surveillance/* ]]; then
+        echo "[PERM-SURVEILLANCE] $filepath"
+        continue
     fi
 
     IS_DIR=0
