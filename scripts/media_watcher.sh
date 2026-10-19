@@ -112,9 +112,9 @@ while IFS='|' read -r event filepath; do
         fi
     fi
 
-    # Surveillance Station needs permission/ACL normalization only; do not index its files.
+    # Surveillance Station needs permission/ACL normalization only; keep it quiet
+    # during normal operation and never pass its files to synoindex.
     if [[ "$filepath" == /surveillance/* ]]; then
-        echo "[PERM-SURVEILLANCE] $filepath"
         continue
     fi
 
