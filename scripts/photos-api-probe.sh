@@ -74,7 +74,7 @@ curl -k -sS "$@"
 printf '\n'
 
 printf '\n%s\n' '===== Browse.Folder.list (read-only) ====='
-curl -k -sS --get "${API_ROOT}/entry.cgi" \
+set -- --get "${API_ROOT}/entry.cgi" \
     --data-urlencode 'api=SYNO.FotoTeam.Browse.Folder' \
     --data-urlencode 'version=2' \
     --data-urlencode 'method=list' \
@@ -82,25 +82,9 @@ curl -k -sS --get "${API_ROOT}/entry.cgi" \
     --data-urlencode 'offset=0' \
     --data-urlencode "_sid=$SID"
 if [ -n "$PARENT_ID" ]; then
-    # Synology Photos folder.list uses "id" for the parent folder.
-    set -- --get "${API_ROOT}/entry.cgi" \
-        --data-urlencode 'api=SYNO.FotoTeam.Browse.Folder' \
-        --data-urlencode 'version=2' \
-        --data-urlencode 'method=list' \
-        --data-urlencode "id=$PARENT_ID" \
-        --data-urlencode "limit=$LIMIT" \
-        --data-urlencode 'offset=0' \
-        --data-urlencode "_sid=$SID"
-    curl -k -sS "$@"
-else
-    curl -k -sS --get "${API_ROOT}/entry.cgi" \
-        --data-urlencode 'api=SYNO.FotoTeam.Browse.Folder' \
-        --data-urlencode 'version=2' \
-        --data-urlencode 'method=list' \
-        --data-urlencode "limit=$LIMIT" \
-        --data-urlencode 'offset=0' \
-        --data-urlencode "_sid=$SID"
+    set -- "$@" --data-urlencode "id=$PARENT_ID"
 fi
+curl -k -sS "$@"
 printf '\n'
 
 printf '\n%s\n' '===== Index.get (read-only) ====='
