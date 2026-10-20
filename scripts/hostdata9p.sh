@@ -6,7 +6,12 @@ SURV="/mnt/surveillance"
 
 is_mounted()
 {
-    mount | grep -q " on $1 "
+    mount | grep -F -q " on $1 "
+}
+
+is_9p_mounted()
+{
+    mount | grep -F -q " on $1 type 9p "
 }
 
 mount_9p()
@@ -16,18 +21,22 @@ mount_9p()
 
     mkdir -p "$TARGET"
 
-    if ! is_mounted "$TARGET"; then
-        mount -t 9p \
+    if is_9p_mounted "$TARGET"; then
+        echo "[hostdata9p] 9P sudah mounted: $DEV -> $TARGET"
+    elif is_mounted "$TARGET"; then
+        echo "[hostdata9p] ERROR: target sudah mounted dengan filesystem lain; tidak ditimpa: $TARGET"
+    else
+        if mount -t 9p \
             -o trans=virtio,version=9p2000.L,msize=1048576,cache=mmap \
-            "$DEV" "$TARGET"
-
-        if is_mounted "$TARGET"; then
-            echo "[hostdata9p] 9P mount berhasil: $DEV -> $TARGET"
+            "$DEV" "$TARGET"; then
+            if is_9p_mounted "$TARGET"; then
+                echo "[hostdata9p] 9P mount berhasil: $DEV -> $TARGET"
+            else
+                echo "[hostdata9p] 9P mount GAGAL diverifikasi: $DEV -> $TARGET"
+            fi
         else
             echo "[hostdata9p] 9P mount GAGAL: $DEV -> $TARGET"
         fi
-    else
-        echo "[hostdata9p] 9P sudah mounted: $DEV -> $TARGET"
     fi
 }
 
@@ -38,16 +47,25 @@ bind_mount()
 
     mkdir -p "$DST"
 
-    if [ -d "$SRC" ] && ! is_mounted "$DST"; then
-        mount --bind "$SRC" "$DST"
-
-        if is_mounted "$DST"; then
-            echo "[hostdata9p] bind mount berhasil: $SRC -> $DST"
+    if [ ! -d "$SRC" ]; then
+        echo "[hostdata9p] bind mount GAGAL: source tidak tersedia: $SRC"
+    elif ! is_9p_mounted "$SRC"; then
+        echo "[hostdata9p] bind mount GAGAL: source bukan mount 9P: $SRC"
+    elif is_9p_mounted "$DST"; then
+        echo "[hostdata9p] bind mount sudah benar: $SRC -> $DST"
+    else
+        # DST may already be mounted from the local system volume (for example
+        # /dev/md0). Overlay it with the intended 9P share instead of treating
+        # any mount at DST as proof that the bind mount is correct.
+        if mount --bind "$SRC" "$DST"; then
+            if is_9p_mounted "$DST"; then
+                echo "[hostdata9p] bind mount berhasil: $SRC -> $DST"
+            else
+                echo "[hostdata9p] bind mount GAGAL diverifikasi: $SRC -> $DST"
+            fi
         else
             echo "[hostdata9p] bind mount GAGAL: $SRC -> $DST"
         fi
-    else
-        echo "[hostdata9p] bind mount sudah ada / source tidak tersedia: $SRC -> $DST"
     fi
 }
 
@@ -57,10 +75,10 @@ case "$1" in
 
         mount_9p hostdata0 "$HOSTDATA"
         mount_9p hostdata1 "$SURV"
-	mount_9p hostdata2 "$HOSTDATA1"
+        mount_9p hostdata2 "$HOSTDATA1"
 
         bind_mount "$HOSTDATA" "/volume1/music"
-	bind_mount "$HOSTDATA1" "/volume1/photo"
+        bind_mount "$HOSTDATA1" "/volume1/photo"
         bind_mount "$SURV" "/volume1/surveillance"
 
         echo "[hostdata9p] START selesai"
@@ -71,11 +89,11 @@ case "$1" in
 
         umount "/volume1/surveillance" 2>/dev/null
         umount "/volume1/music" 2>/dev/null
-	umount "/volume1/photo" 2>/dev/null
+        umount "/volume1/photo" 2>/dev/null
 
         umount "$SURV" 2>/dev/null
         umount "$HOSTDATA" 2>/dev/null
- 	umount "$HOSTDATA1" 2>/dev/null
+        umount "$HOSTDATA1" 2>/dev/null
         ;;
 
     restart)
