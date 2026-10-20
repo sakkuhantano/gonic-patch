@@ -10,6 +10,7 @@ set -u
 API_ROOT="${DSM_URL%/}/webapi"
 LIMIT="${LIMIT:-1}"
 FOLDER_ID="${FOLDER_ID:-}"
+PARENT_ID="${PARENT_ID:-}"
 
 if ! command -v curl >/dev/null 2>&1; then
     echo "ERROR: curl is required" >&2
@@ -80,6 +81,26 @@ curl -k -sS --get "${API_ROOT}/entry.cgi" \
     --data-urlencode "limit=$LIMIT" \
     --data-urlencode 'offset=0' \
     --data-urlencode "_sid=$SID"
+if [ -n "$PARENT_ID" ]; then
+    # Synology Photos folder.list uses "id" for the parent folder.
+    set -- --get "${API_ROOT}/entry.cgi" \
+        --data-urlencode 'api=SYNO.FotoTeam.Browse.Folder' \
+        --data-urlencode 'version=2' \
+        --data-urlencode 'method=list' \
+        --data-urlencode "id=$PARENT_ID" \
+        --data-urlencode "limit=$LIMIT" \
+        --data-urlencode 'offset=0' \
+        --data-urlencode "_sid=$SID"
+    curl -k -sS "$@"
+else
+    curl -k -sS --get "${API_ROOT}/entry.cgi" \
+        --data-urlencode 'api=SYNO.FotoTeam.Browse.Folder' \
+        --data-urlencode 'version=2' \
+        --data-urlencode 'method=list' \
+        --data-urlencode "limit=$LIMIT" \
+        --data-urlencode 'offset=0' \
+        --data-urlencode "_sid=$SID"
+fi
 printf '\n'
 
 printf '\n%s\n' '===== Index.get (read-only) ====='
