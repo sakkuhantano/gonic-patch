@@ -40,7 +40,7 @@ LOGIN_RESPONSE=$(curl -k -sS --get "${API_ROOT}/auth.cgi" \
     --data-urlencode 'format=sid')
 unset DSM_PASS
 
-SID=$(printf '%s' "$LOGIN_RESPONSE" | sed -n 's/.*"sid"[[:space:]]*:[[:space:]]*"\\([^"]*\\)".*/\\1/p')
+SID=$(printf '%s' "$LOGIN_RESPONSE" | sed -n 's/.*"sid"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
 if [ -z "$SID" ]; then
     echo "ERROR: DSM login did not return a SID. Raw response:" >&2
     printf '%s\n' "$LOGIN_RESPONSE" >&2
