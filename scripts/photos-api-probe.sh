@@ -19,21 +19,7 @@ if ! command -v curl >/dev/null 2>&1; then
     exit 1
 fi
 
-request()
-{
-    LABEL="$1"
-    shift
-    printf '\n===== %s =====\n' "$LABEL"
-    curl -k -sS --get "${API_ROOT}/entry.cgi" \
-        --data-urlencode "api=$1" \
-        --data-urlencode "version=$2" \
-        --data-urlencode "method=$3" \
-        "${@:4}" 2>/dev/null
-    printf '\n'
-}
-
-# POSIX sh does not support array-style positional expansion. Keep each
-# request explicit so this remains compatible with DSM's /bin/sh.
+# Keep each request explicit for compatibility with DSM's /bin/sh.
 printf '%s\n' '===== API metadata ====='
 curl -k -sS --get "${API_ROOT}/query.cgi" \
     --data-urlencode 'api=SYNO.API.Info' \
