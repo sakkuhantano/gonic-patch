@@ -1,13 +1,35 @@
 #!/bin/sh
 
-# QEMU virtio-9p shares are already mounted by DSM at these paths.
-HOSTDATA="/volume1/virtio9p/hostdata0"
-HOSTDATA1="/volume1/virtio9p/hostdata2"
-SURV="/volume1/surveillance"
+# DSM/QEMU may mount the 9P shares after the rc.d bootstrap starts.
+MUSIC_SRC="/volume1/virtio9p/hostdata0"
+PHOTO_SRC="/volume1/virtio9p/hostdata2"
+SURV_SRC="/volume1/virtio9p/hostdata1"
+MUSIC_DST="/volume1/music"
+PHOTO_DST="/volume1/photo"
+SURV_DST="/volume1/surveillance"
+WAIT_SECONDS=120
 
 is_9p_mounted()
 {
     mount | grep -F -q " on $1 type 9p "
+}
+
+wait_for_9p()
+{
+    TARGET="$1"
+    WAITED=0
+
+    while [ "$WAITED" -lt "$WAIT_SECONDS" ]; do
+        if is_9p_mounted "$TARGET"; then
+            echo "[hostdata9p] source 9P siap: $TARGET"
+            return 0
+        fi
+        sleep 2
+        WAITED=$((WAITED + 2))
+    done
+
+    echo "[hostdata9p] ERROR: menunggu mount 9P timeout setelah ${WAIT_SECONDS}s: $TARGET"
+    return 1
 }
 
 bind_mount()
@@ -37,8 +59,8 @@ bind_mount()
         return 0
     fi
 
-    # Bind over the target if it currently shows an ordinary local directory
-    # or a local filesystem. Do not unmount that underlying filesystem.
+    # Overlay the local DSM directory/filesystem with the intended share.
+    # Do not unmount the underlying filesystem.
     if mount --bind "$SRC" "$DST"; then
         if is_9p_mounted "$DST"; then
             echo "[hostdata9p] bind mount berhasil: $SRC -> $DST"
@@ -57,15 +79,21 @@ case "$1" in
     start)
         echo "[hostdata9p] START"
 
-        # Do not mount the virtio tags a second time: DSM/QEMU already mounted
-        # them under /volume1/virtio9p (and surveillance at /volume1/surveillance).
-        bind_mount "$HOSTDATA" "/volume1/music" || exit 1
-        bind_mount "$HOSTDATA1" "/volume1/photo" || exit 1
+        # Wait for QEMU/DSM to publish the source shares before binding them.
+        wait_for_9p "$MUSIC_SRC" || exit 1
+        wait_for_9p "$PHOTO_SRC" || exit 1
 
-        if is_9p_mounted "$SURV"; then
-            echo "[hostdata9p] share surveillance sudah mounted: $SURV"
+        bind_mount "$MUSIC_SRC" "$MUSIC_DST" || exit 1
+        bind_mount "$PHOTO_SRC" "$PHOTO_DST" || exit 1
+
+        # Surveillance may be mounted directly at its final destination by DSM,
+        # or under /volume1/virtio9p/hostdata1. Handle both boot layouts.
+        if is_9p_mounted "$SURV_DST"; then
+            echo "[hostdata9p] Surveillance sudah mounted langsung: $SURV_DST"
+        elif is_9p_mounted "$SURV_SRC"; then
+            bind_mount "$SURV_SRC" "$SURV_DST" || exit 1
         else
-            echo "[hostdata9p] WARNING: share surveillance tidak terdeteksi sebagai 9P: $SURV"
+            echo "[hostdata9p] WARNING: source Surveillance belum tersedia; tidak mengubah target"
         fi
 
         echo "[hostdata9p] START selesai"
@@ -74,10 +102,9 @@ case "$1" in
     stop)
         echo "[hostdata9p] STOP"
 
-        # Only detach the two share bind mounts when they are 9P mounts.
-        # Never unmount /volume1/surveillance or the original DSM filesystem
-        # mounts at /volume1/music and /volume1/photo.
-        for TARGET in "/volume1/music" "/volume1/photo"; do
+        # Only detach Music/Photo bind mounts. Never unmount the source shares
+        # or Surveillance, which DSM may mount directly at its final path.
+        for TARGET in "$MUSIC_DST" "$PHOTO_DST"; do
             if is_9p_mounted "$TARGET"; then
                 if umount "$TARGET"; then
                     echo "[hostdata9p] bind mount dilepas: $TARGET"
