@@ -11,7 +11,9 @@ MONITOR_DIRS=(
 )
 
 # Ignore Synology-generated metadata, thumbnails, and common OS sidecar files.
-EXCLUDE_RE='(^|/)(@eaDir|\.@thumb|\.@__thumb|@SynoResource|\.thumbnails|thumbnails|thumbs)(/|$)|(^|/)(SYNOPHOTO[^/]*|\.DS_Store|[Tt]humbs\.db|desktop\.ini|\._[^/]*|[^/]*\.(thumb|thumbnail))$'
+# @SSRECMETA is Surveillance Station's internal recording metadata directory;
+# do not chmod its contents or process events beneath it.
+EXCLUDE_RE='(^|/)(@eaDir|@SSRECMETA|\.@thumb|\.@__thumb|@SynoResource|\.thumbnails|thumbnails|thumbs)(/|$)|(^|/)(SYNOPHOTO[^/]*|\.DS_Store|[Tt]humbs\.db|desktop\.ini|\._[^/]*|[^/]*\.(thumb|thumbnail))$'
 
 EXISTING_DIRS=()
 
