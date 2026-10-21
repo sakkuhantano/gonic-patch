@@ -10,10 +10,52 @@ MONITOR_DIRS=(
     "/surveillance"
 )
 
-# Ignore Synology-generated metadata, thumbnails, and common OS sidecar files.
-# @SSRECMETA is Surveillance Station's internal recording metadata directory;
-# do not chmod its contents or process events beneath it.
-EXCLUDE_RE='(^|/)(@eaDir|@SSRECMETA|\.@thumb|\.@__thumb|@SynoResource|\.thumbnails|thumbnails|thumbs)(/|$)|(^|/)(SYNOPHOTO[^/]*|\.DS_Store|[Tt]humbs\.db|desktop\.ini|\._[^/]*|[^/]*\.(thumb|thumbnail))$'
+# Directory names excluded anywhere in monitored trees.
+# Add/remove entries here; inotifywait will not watch inside matching directories.
+IGNORE_DIR_NAMES=(
+    "@eaDir"
+    "@SSRECMETA"
+    ".@thumb"
+    ".@__thumb"
+    "@SynoResource"
+    ".thumbnails"
+    "thumbnails"
+    "thumbs"
+)
+
+# File-name patterns excluded anywhere in monitored trees.
+# These are regular expressions (not shell globs).
+IGNORE_FILE_PATTERNS=(
+    'SYNOPHOTO[^/]*'
+    '\.DS_Store'
+    '[Tt]humbs\.db'
+    'desktop\.ini'
+    '\._[^/]*'
+    '[^/]*\.(thumb|thumbnail)'
+)
+
+# Build the inotifywait regex from the lists above.
+IGNORE_DIR_ALT=""
+for name in "${IGNORE_DIR_NAMES[@]}"; do
+    # Current directory names contain no regex metacharacters needing escaping.
+    [[ -n "$IGNORE_DIR_ALT" ]] && IGNORE_DIR_ALT+="|"
+    IGNORE_DIR_ALT+="$name"
+done
+
+IGNORE_FILE_ALT=""
+for pattern in "${IGNORE_FILE_PATTERNS[@]}"; do
+    [[ -n "$IGNORE_FILE_ALT" ]] && IGNORE_FILE_ALT+="|"
+    IGNORE_FILE_ALT+="($pattern)"
+done
+
+EXCLUDE_RE=""
+if [[ -n "$IGNORE_DIR_ALT" ]]; then
+    EXCLUDE_RE="(^|/)($IGNORE_DIR_ALT)(/|$)"
+fi
+if [[ -n "$IGNORE_FILE_ALT" ]]; then
+    [[ -n "$EXCLUDE_RE" ]] && EXCLUDE_RE+="|"
+    EXCLUDE_RE+="(^|/)($IGNORE_FILE_ALT)$"
+fi
 
 EXISTING_DIRS=()
 
@@ -59,7 +101,8 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 1' TERM INT HUP
 
-echo "[START] Filter metadata Synology aktif."
+echo "[START] Filter metadata aktif."
+echo "[START] Ignore directories: ${IGNORE_DIR_NAMES[*]}"
 echo "[START] Satu inotifywait untuk indexing dan permission pada mount 9P."
 
 inotifywait -m -r \
