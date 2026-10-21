@@ -10,15 +10,15 @@ MONITOR_DIRS=(
     "/surveillance"
 )
 
-# Directory names excluded anywhere in monitored trees.
-# Add/remove entries here; inotifywait will not watch inside matching directories.
+# Regex-escaped directory names excluded anywhere in monitored trees.
+# Add/remove entries here; escape regex metacharacters such as '.' with '\\'.
 IGNORE_DIR_NAMES=(
     "@eaDir"
     "@SSRECMETA"
-    ".@thumb"
-    ".@__thumb"
+    '\\.@thumb'
+    '\\.@__thumb'
     "@SynoResource"
-    ".thumbnails"
+    '\\.thumbnails'
     "thumbnails"
     "thumbs"
 )
@@ -37,7 +37,6 @@ IGNORE_FILE_PATTERNS=(
 # Build the inotifywait regex from the lists above.
 IGNORE_DIR_ALT=""
 for name in "${IGNORE_DIR_NAMES[@]}"; do
-    # Current directory names contain no regex metacharacters needing escaping.
     [[ -n "$IGNORE_DIR_ALT" ]] && IGNORE_DIR_ALT+="|"
     IGNORE_DIR_ALT+="$name"
 done
