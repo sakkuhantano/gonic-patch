@@ -59,6 +59,21 @@ photo_api_call() {
         echo "[PHOTO-API-ERROR] $api.$method failed: $(jq -c '.error // .' <<<"$response")" >&2; return 1; }
     printf '%s' "$response"
 }
+photo_api_read_call() {
+    local api="$1" version="$2" method="$3"
+    shift 3
+    local response
+    # Browse/list requests are issued as GET, matching the successful DSM
+    # diagnostics; keep mutation requests on photo_api_call (POST).
+    response=$(curl -fsS --connect-timeout 10 --max-time 45 -G \
+        -b "$PHOTO_API_COOKIE" -c "$PHOTO_API_COOKIE" \
+        "$DSM_API_URL/entry.cgi" --data-urlencode "api=$api" \
+        --data-urlencode "version=$version" --data-urlencode "method=$method" \
+        --data-urlencode "SynoToken=$PHOTO_API_TOKEN" "$@") || return 1
+    [[ "$(jq -r '.success // false' <<<"$response")" == "true" ]] || {
+        echo "[PHOTO-API-ERROR] $api.$method failed: $(jq -c '.error // .' <<<"$response")" >&2; return 1; }
+    printf '%s' "$response"
+}
 photo_api_folder_id_for_path() {
     local fullpath="$1" relpath component current_path="" current_id=1
     local listing matches count offset page_matches all_matches
@@ -80,7 +95,7 @@ photo_api_folder_id_for_path() {
         offset=0
         all_matches='[]'
         while :; do
-            listing=$(photo_api_call 'SYNO.FotoTeam.Browse.Folder' 2 list \
+            listing=$(photo_api_read_call 'SYNO.FotoTeam.Browse.Folder' 2 list \
                 --data-urlencode "id=$current_id" \
                 --data-urlencode 'limit=1000' \
                 --data-urlencode "offset=$offset") || return 1
@@ -123,7 +138,7 @@ photo_api_cleanup_path() {
         parent="${oldpath%/*}"
         filename="${oldpath##*/}"
         folder_id=$(photo_api_folder_id_for_path "$parent") || return 1
-        item_listing=$(photo_api_call 'SYNO.FotoTeam.Browse.Item' 7 list \
+        item_listing=$(photo_api_read_call 'SYNO.FotoTeam.Browse.Item' 7 list \
             --data-urlencode "folder_id=$folder_id" \
             --data-urlencode 'limit=1000' --data-urlencode 'offset=0') || return 1
         ids=$(jq -c --arg n "$filename" \
