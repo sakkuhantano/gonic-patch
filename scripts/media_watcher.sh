@@ -309,6 +309,7 @@ MONITOR_DIRS=(
 # Add/remove entries here; escape regex metacharacters such as '.' with '\\'.
 IGNORE_DIR_NAMES=(
     "@eaDir"
+    "@Recycle"
     "@SSRECMETA"
     '\.@thumb'
     '\.@__thumb'
@@ -331,7 +332,7 @@ IGNORE_FILE_PATTERNS=(
 
 # Use the known-working explicit regex rather than constructing it dynamically.
 # Keep this aligned with the previously working watcher filter.
-EXCLUDE_RE='(^|/)(@eaDir|@SSRECMETA|\.@thumb|\.@__thumb|@SynoResource|\.thumbnails|thumbnails|thumbs)(/|$)|(^|/)(SYNOPHOTO[^/]*|\.DS_Store|[Tt]humbs\.db|desktop\.ini|\._[^/]*|[^/]*\.(thumb|thumbnail))$'
+EXCLUDE_RE='(^|/)(@eaDir|@Recycle|@SSRECMETA|\.@thumb|\.@__thumb|@SynoResource|\.thumbnails|thumbnails|thumbs)(/|$)|(^|/)(SYNOPHOTO[^/]*|\.DS_Store|[Tt]humbs\.db|desktop\.ini|\._[^/]*|[^/]*\.(thumb|thumbnail))$'
 
 EXISTING_DIRS=()
 
