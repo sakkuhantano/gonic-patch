@@ -273,7 +273,8 @@ photo_api_cleanup_path() {
         parent="${oldpath%/*}"
         filename="${oldpath##*/}"
         folder_id=$(photo_api_folder_id_for_path "$parent") || return 1
-        local folder_verify folder_count folder_still_present folder_attempt folder_offset
+        local folder_verify folder_count folder_still_present folder_attempt folder_offset photo_relative_path
+        photo_relative_path="${oldpath#/volume1/photo}"
         folder_still_present=1
         for folder_attempt in 1 2 3; do
             folder_offset=0
@@ -283,7 +284,7 @@ photo_api_cleanup_path() {
                     --data-urlencode "id=$folder_id" \
                     --data-urlencode 'limit=1000' \
                     --data-urlencode "offset=$folder_offset") || return 1
-                if jq -e --arg p "$oldpath" \
+                if jq -e --arg p "$photo_relative_path" \
                     '.data.list[]? | select(.name == $p)' \
                     <<<"$folder_verify" >/dev/null; then
                     folder_still_present=1
