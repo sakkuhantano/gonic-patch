@@ -3,6 +3,7 @@
 DSM_IP="192.168.10.3"
 DSM_USER="hendry"
 DSM_SYNOINDEX="/usr/syno/bin/synoindex"
+DSM_PHOTO_INDEX="/var/packages/SynologyPhotos/target/usr/bin/synofoto-bin-index-tool"
 
 MONITOR_DIRS=(
     "/media/Music"
@@ -106,7 +107,7 @@ echo "[START] Satu inotifywait untuk indexing dan permission pada mount 9P."
 
 inotifywait -m -r \
     --exclude "$EXCLUDE_RE" \
-    -e create,moved_to,delete,close_write \
+    -e create,moved_from,moved_to,delete,close_write \
     --format '%e|%w%f' \
     "${EXISTING_DIRS[@]}" > "$FIFO" &
 
@@ -167,41 +168,50 @@ while IFS='|' read -r event filepath; do
         IS_DIR=1
     fi
 
-    # A file's CREATE event can arrive before its contents have been written.
-    # Index files only after CLOSE_WRITE, or immediately when moved into the tree.
-    # Directories are indexed on CREATE/MOVED_TO so newly created folders are scanned.
-    if [[ "$event" != *DELETE* && "$IS_DIR" -eq 0 &&
-          "$event" == *CREATE* &&
-          "$event" != *MOVED_TO* &&
-          "$event" != *CLOSE_WRITE* ]]; then
+    # Files may emit CREATE before writing finishes. For Photos, use the
+    # Synology Photos basic indexer after CLOSE_WRITE or MOVED_TO.
+    if [[ "$event" != *DELETE* && "$event" != *MOVED_FROM* &&
+          "$IS_DIR" -eq 0 && "$event" == *CREATE* &&
+          "$event" != *MOVED_TO* && "$event" != *CLOSE_WRITE* ]]; then
         continue
     fi
 
-    if [[ "$event" == *DELETE* ]]; then
-        if [ "$IS_DIR" -eq 1 ]; then
-            ACTION="-D"
-            LABEL="INDEX-DELETE-DIR"
-        else
-            ACTION="-d"
-            LABEL="INDEX-DELETE"
+    if [[ "$filepath" == /media/Photo/* ]]; then
+        if [[ "$event" == *MOVED_FROM* || "$event" == *DELETE* ]]; then
+            if [[ "$IS_DIR" -eq 1 ]]; then ACTION="-D"; LABEL="PHOTO-INDEX-DELETE-DIR";
+            else ACTION="-d"; LABEL="PHOTO-INDEX-DELETE"; fi
+            echo "[$LABEL] $DSM_FILEPATH"
+            if ! ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no \
+                "${DSM_USER}@${DSM_IP}" "$DSM_SYNOINDEX $ACTION \"$DSM_FILEPATH\"" </dev/null; then
+                echo "[ERROR] synoindex cleanup gagal: $DSM_FILEPATH (aksi=$ACTION)" >&2
+            fi
+            continue
         fi
+
+        if [[ "$event" == *CLOSE_WRITE* || "$event" == *MOVED_TO* ||
+              ( "$IS_DIR" -eq 1 && "$event" == *CREATE* ) ]]; then
+            if ! ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no \
+                "${DSM_USER}@${DSM_IP}" "\"$DSM_PHOTO_INDEX\" -t basic -i \"$DSM_FILEPATH\"" </dev/null; then
+                echo "[ERROR] synofoto basic gagal: $DSM_FILEPATH" >&2
+            else
+                echo "[PHOTO-INDEX-BASIC] $DSM_FILEPATH"
+            fi
+        fi
+        continue
+    fi
+
+    # Keep existing Music indexing behavior unchanged.
+    if [[ "$event" == *MOVED_FROM* || "$event" == *DELETE* ]]; then
+        if [[ "$IS_DIR" -eq 1 ]]; then ACTION="-D"; LABEL="INDEX-DELETE-DIR";
+        else ACTION="-d"; LABEL="INDEX-DELETE"; fi
     else
-        if [ "$IS_DIR" -eq 1 ]; then
-            ACTION="-A"
-            LABEL="INDEX-ADD-DIR"
-        else
-            ACTION="-a"
-            LABEL="INDEX-ADD"
-        fi
+        if [[ "$IS_DIR" -eq 1 ]]; then ACTION="-A"; LABEL="INDEX-ADD-DIR";
+        else ACTION="-a"; LABEL="INDEX-ADD"; fi
     fi
 
     echo "[$LABEL] $DSM_FILEPATH"
-
-    if ! ssh -o BatchMode=yes \
-        -o ConnectTimeout=10 \
-        -o StrictHostKeyChecking=no \
-        "${DSM_USER}@${DSM_IP}" \
-        "$DSM_SYNOINDEX $ACTION \"$DSM_FILEPATH\"" </dev/null; then
+    if ! ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no \
+        "${DSM_USER}@${DSM_IP}" "$DSM_SYNOINDEX $ACTION \"$DSM_FILEPATH\"" </dev/null; then
         echo "[ERROR] Perintah synoindex gagal: $DSM_FILEPATH (aksi=$ACTION)" >&2
     fi
 
