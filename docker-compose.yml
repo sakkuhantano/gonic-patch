@@ -38,6 +38,10 @@ services:
       
       - /share/CACHEDEV3_DATA/Public/container/configs/supervisor/supervisord.conf:/etc/supervisor/conf.d/services.conf
       - /share/CACHEDEV3_DATA/Public/container/configs/ssh:/root/.ssh
+      # Persistent Hermes config, model auth, Telegram settings, sessions and memory
+      - /share/CACHEDEV3_DATA/Public/container/configs/hermes:/root/.hermes
+      # Dedicated coding workspace for AI agent repositories
+      - /share/CACHEDEV3_DATA/Public/container/ai-workspace:/workspace
       
       # MULTI-FOLDER MOUNT BIND KE DALAM 1 FOLDER /media:
       - /share/CACHEDEV2_DATA/MUSIC:/media/Music
