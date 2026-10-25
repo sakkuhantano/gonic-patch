@@ -112,27 +112,9 @@ IGNORE_FILE_PATTERNS=(
     '[^/]*\.(thumb|thumbnail)'
 )
 
-# Build the inotifywait regex from the lists above.
-IGNORE_DIR_ALT=""
-for name in "${IGNORE_DIR_NAMES[@]}"; do
-    [[ -n "$IGNORE_DIR_ALT" ]] && IGNORE_DIR_ALT+="|"
-    IGNORE_DIR_ALT+="$name"
-done
-
-IGNORE_FILE_ALT=""
-for pattern in "${IGNORE_FILE_PATTERNS[@]}"; do
-    [[ -n "$IGNORE_FILE_ALT" ]] && IGNORE_FILE_ALT+="|"
-    IGNORE_FILE_ALT+="($pattern)"
-done
-
-EXCLUDE_RE=""
-if [[ -n "$IGNORE_DIR_ALT" ]]; then
-    EXCLUDE_RE="(^|/)($IGNORE_DIR_ALT)(/|$)"
-fi
-if [[ -n "$IGNORE_FILE_ALT" ]]; then
-    [[ -n "$EXCLUDE_RE" ]] && EXCLUDE_RE+="|"
-    EXCLUDE_RE+="(^|/)($IGNORE_FILE_ALT)$"
-fi
+# Use the known-working explicit regex rather than constructing it dynamically.
+# Keep this aligned with the previously working watcher filter.
+EXCLUDE_RE='(^|/)(@eaDir|@SSRECMETA|\.@thumb|\.@__thumb|@SynoResource|\.thumbnails|thumbnails|thumbs)(/|$)|(^|/)(SYNOPHOTO[^/]*|\.DS_Store|[Tt]humbs\.db|desktop\.ini|\._[^/]*|[^/]*\.(thumb|thumbnail))$'
 
 EXISTING_DIRS=()
 
@@ -192,6 +174,7 @@ inotifywait -m -r \
 INOTIFY_PID=$!
 
 while IFS='|' read -r event filepath; do
+    echo "[INOTIFY-EVENT] $event|$filepath"
     case "$filepath" in
         /media/Music/*)
             DSM_FILEPATH="/volume1/music${filepath#/media/Music}"
