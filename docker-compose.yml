@@ -5,7 +5,10 @@ services:
   # CONTAINER 1: Lighttpd Proxy & Tools
   # ==========================================
   aio-tools:
-    build: .
+    build:
+      context: .
+      args:
+        SSH_ROOT_PASSWORD: ${SSH_ROOT_PASSWORD:-}
     container_name: ubuntu-services
     image: ubuntu-services
     restart: always
