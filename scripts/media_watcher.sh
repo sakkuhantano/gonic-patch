@@ -22,12 +22,14 @@ if [[ -r "$DSM_API_CONFIG" ]]; then
 fi
 PHOTO_API_TMP=""
 PHOTO_API_COOKIE=""
+PHOTO_API_SID=""
 PHOTO_API_TOKEN=""
 
 photo_api_init() {
     # Do not leave a stale cookie/token marker after a failed login; the next
     # cleanup attempt must authenticate again instead of using an empty token.
     PHOTO_API_COOKIE=""
+    PHOTO_API_SID=""
     PHOTO_API_TOKEN=""
     [[ -n "$DSM_API_PASSWORD" ]] || { echo "[PHOTO-API-ERROR] Set DSM_API_PASSWORD or configure $DSM_API_CONFIG" >&2; return 1; }
     command -v curl >/dev/null 2>&1 || { echo "[PHOTO-API-ERROR] curl unavailable" >&2; return 1; }
@@ -40,11 +42,13 @@ photo_api_init() {
         -X POST "$DSM_API_URL/auth.cgi" \
         --data-urlencode 'api=SYNO.API.Auth' --data-urlencode 'version=6' --data-urlencode 'method=login' \
         --data-urlencode "account=$DSM_API_USER" --data-urlencode "passwd=$DSM_API_PASSWORD" \
-        --data-urlencode 'session=SynologyPhotos' --data-urlencode 'format=cookie' --data-urlencode 'enable_syno_token=yes') || {
+        --data-urlencode 'session=SynologyPhotos' --data-urlencode 'format=sid' --data-urlencode 'enable_syno_token=yes') || {
         echo "[PHOTO-API-ERROR] DSM login request failed" >&2; return 1; }
     [[ "$(jq -r '.success // false' <<<"$login")" == "true" ]] || {
         echo "[PHOTO-API-ERROR] DSM login rejected: $(jq -r '.error.code // "unknown"' <<<"$login")" >&2; return 1; }
+    PHOTO_API_SID=$(jq -r '.data.sid // empty' <<<"$login")
     PHOTO_API_TOKEN=$(jq -r '.data.SynoToken // .data.synotoken // empty' <<<"$login")
+    [[ -n "$PHOTO_API_SID" ]] || { echo "[PHOTO-API-ERROR] SID missing" >&2; return 1; }
     [[ -n "$PHOTO_API_TOKEN" ]] || { echo "[PHOTO-API-ERROR] SynoToken missing" >&2; return 1; }
 }
 photo_api_call() {
@@ -54,7 +58,7 @@ photo_api_call() {
     response=$(curl -fsS --connect-timeout 10 --max-time 45 -b "$PHOTO_API_COOKIE" -c "$PHOTO_API_COOKIE" \
         -X POST "$DSM_API_URL/entry.cgi" --data-urlencode "api=$api" \
         --data-urlencode "version=$version" --data-urlencode "method=$method" \
-        --data-urlencode "SynoToken=$PHOTO_API_TOKEN" "$@") || return 1
+        --data-urlencode "SynoToken=$PHOTO_API_TOKEN" --data-urlencode "_sid=$PHOTO_API_SID" "$@") || return 1
     [[ "$(jq -r '.success // false' <<<"$response")" == "true" ]] || {
         echo "[PHOTO-API-ERROR] $api.$method failed: $(jq -c '.error // .' <<<"$response")" >&2; return 1; }
     printf '%s' "$response"
