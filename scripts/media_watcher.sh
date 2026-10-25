@@ -44,7 +44,7 @@ photo_api_init() {
         echo "[PHOTO-API-ERROR] DSM login request failed" >&2; return 1; }
     [[ "$(jq -r '.success // false' <<<"$login")" == "true" ]] || {
         echo "[PHOTO-API-ERROR] DSM login rejected: $(jq -r '.error.code // "unknown"' <<<"$login")" >&2; return 1; }
-    PHOTO_API_TOKEN=$(jq -r '.data.SynoToken // empty' <<<"$login")
+    PHOTO_API_TOKEN=$(jq -r '.data.SynoToken // .data.synotoken // empty' <<<"$login")
     [[ -n "$PHOTO_API_TOKEN" ]] || { echo "[PHOTO-API-ERROR] SynoToken missing" >&2; return 1; }
 }
 photo_api_call() {
