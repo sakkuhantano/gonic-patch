@@ -59,28 +59,87 @@ photo_api_call() {
         echo "[PHOTO-API-ERROR] $api.$method failed: $(jq -c '.error // .' <<<"$response")" >&2; return 1; }
     printf '%s' "$response"
 }
+photo_api_folder_id_for_path() {
+    local fullpath="$1" relpath component current_path="" current_id=1
+    local listing matches count offset page_matches all_matches
+    local -a parts=()
+
+    # Only resolve paths inside the Synology Photos Shared Space root.
+    [[ "$fullpath" == "/volume1/photo" || "$fullpath" == "/volume1/photo/"* ]] || {
+        echo "[PHOTO-API-ERROR] refusing path outside /volume1/photo: $fullpath" >&2
+        return 1
+    }
+    relpath="${fullpath#/volume1/photo}"
+    relpath="${relpath%/}"
+    [[ -n "$relpath" ]] || { printf '1'; return 0; }
+
+    IFS='/' read -r -a parts <<< "${relpath#/}"
+    for component in "${parts[@]}"; do
+        [[ -n "$component" ]] || continue
+        current_path+="/$component"
+        offset=0
+        all_matches='[]'
+        while :; do
+            listing=$(photo_api_call 'SYNO.FotoTeam.Browse.Folder' 2 list \
+                --data-urlencode "id=$current_id" \
+                --data-urlencode 'limit=1000' \
+                --data-urlencode "offset=$offset") || return 1
+            page_matches=$(jq -c --arg p "$current_path" \
+                '[.data.list[]? | select(.name == $p) | .id] | map(select(. != null))' \
+                <<<"$listing") || return 1
+            all_matches=$(jq -cn --argjson a "$all_matches" --argjson b "$page_matches" '$a + $b | unique') || return 1
+            count=$(jq '.data.list | length' <<<"$listing") || return 1
+            (( count < 1000 )) && break
+            offset=$((offset + count))
+        done
+
+        matches=$(jq -c 'unique' <<<"$all_matches") || return 1
+        [[ "$(jq 'length' <<<"$matches")" -eq 1 ]] || {
+            echo "[PHOTO-API-ERROR] folder path component not unique: $current_path (parent ID $current_id, matches $matches)" >&2
+            return 1
+        }
+        current_id=$(jq -r '.[0]' <<<"$matches") || return 1
+        [[ "$current_id" =~ ^[0-9]+$ ]] || {
+            echo "[PHOTO-API-ERROR] invalid folder ID for $current_path" >&2
+            return 1
+        }
+    done
+    printf '%s' "$current_id"
+}
+
 photo_api_cleanup_path() {
-    local oldpath="$1" is_dir="$2" listing ids id relpath parent filename relparent folder_listing folder_ids folder_id item_listing response task
+    local oldpath="$1" is_dir="$2" id folder_id parent filename item_listing ids response task
     [[ -n "$PHOTO_API_COOKIE" ]] || photo_api_init || return 1
+
     if [[ "$is_dir" == "1" ]]; then
-        relpath="${oldpath#/volume1/photo}"; relpath="${relpath%/}"
-        listing=$(photo_api_call 'SYNO.FotoTeam.Browse.Folder' 2 list --data-urlencode 'limit=1000' --data-urlencode 'offset=0') || return 1
-        ids=$(jq -c --arg p "$relpath" '[.data.list[]? | select((.["folder.name"] // .name // .public.folder.name // "") == $p) | (.["folder.id"] // .id // .folder_id // .public.folder.id)] | map(select(. != null)) | unique' <<<"$listing")
-        [[ "$(jq 'length' <<<"$ids")" -eq 1 ]] || { echo "[PHOTO-API-ERROR] folder ID not unique for $oldpath: $ids; refusing delete" >&2; return 1; }
-        id=$(jq -r '.[0]' <<<"$ids")
-        response=$(photo_api_call 'SYNO.FotoTeam.BackgroundTask.File' 1 delete --data-urlencode 'item_id=[]' --data-urlencode "folder_id=[$id]") || return 1
+        id=$(photo_api_folder_id_for_path "$oldpath") || return 1
+        [[ "$id" =~ ^[0-9]+$ ]] || {
+            echo "[PHOTO-API-ERROR] invalid folder ID for $oldpath; refusing delete" >&2
+            return 1
+        }
+        response=$(photo_api_call 'SYNO.FotoTeam.BackgroundTask.File' 1 delete \
+            --data-urlencode 'item_id=[]' --data-urlencode "folder_id=[$id]") || return 1
     else
-        parent="${oldpath%/*}"; filename="${oldpath##*/}"; relparent="${parent#/volume1/photo}"
-        [[ -n "$relparent" ]] || relparent="/"
-        folder_listing=$(photo_api_call 'SYNO.FotoTeam.Browse.Folder' 2 list --data-urlencode 'limit=1000' --data-urlencode 'offset=0') || return 1
-        folder_ids=$(jq -c --arg p "$relparent" '[.data.list[]? | select((.["folder.name"] // .name // .public.folder.name // "") == $p) | (.["folder.id"] // .id // .folder_id // .public.folder.id)] | map(select(. != null)) | unique' <<<"$folder_listing")
-        [[ "$(jq 'length' <<<"$folder_ids")" -eq 1 ]] || { echo "[PHOTO-API-ERROR] parent folder not unique for $parent: $folder_ids; refusing delete" >&2; return 1; }
-        folder_id=$(jq -r '.[0]' <<<"$folder_ids")
-        item_listing=$(photo_api_call 'SYNO.FotoTeam.Browse.Item' 7 list --data-urlencode "folder_id=$folder_id" --data-urlencode 'limit=1000' --data-urlencode 'offset=0') || return 1
-        ids=$(jq -c --arg n "$filename" '[.data.list[]? | select((.["item.name"] // .filename // .name // .["item.filename"] // "") == $n) | (.["item.id"] // .id // .item_id)] | map(select(. != null)) | unique' <<<"$item_listing")
-        [[ "$(jq 'length' <<<"$ids")" -eq 1 ]] || { echo "[PHOTO-API-ERROR] item ID not unique for $oldpath: $ids; refusing delete" >&2; return 1; }
-        id=$(jq -r '.[0]' <<<"$ids")
-        response=$(photo_api_call 'SYNO.FotoTeam.BackgroundTask.File' 1 delete --data-urlencode "item_id=[$id]" --data-urlencode 'folder_id=[]') || return 1
+        parent="${oldpath%/*}"
+        filename="${oldpath##*/}"
+        folder_id=$(photo_api_folder_id_for_path "$parent") || return 1
+        item_listing=$(photo_api_call 'SYNO.FotoTeam.Browse.Item' 7 list \
+            --data-urlencode "folder_id=$folder_id" \
+            --data-urlencode 'limit=1000' --data-urlencode 'offset=0') || return 1
+        ids=$(jq -c --arg n "$filename" \
+            '[.data.list[]? | select(.filename == $n) | .id] | map(select(. != null)) | unique' \
+            <<<"$item_listing") || return 1
+        [[ "$(jq 'length' <<<"$ids")" -eq 1 ]] || {
+            echo "[PHOTO-API-ERROR] item ID not unique for $oldpath: $ids; refusing delete" >&2
+            return 1
+        }
+        id=$(jq -r '.[0]' <<<"$ids") || return 1
+        [[ "$id" =~ ^[0-9]+$ ]] || {
+            echo "[PHOTO-API-ERROR] invalid item ID for $oldpath; refusing delete" >&2
+            return 1
+        }
+        response=$(photo_api_call 'SYNO.FotoTeam.BackgroundTask.File' 1 delete \
+            --data-urlencode "item_id=[$id]" --data-urlencode 'folder_id=[]') || return 1
     fi
     task=$(jq -r '.data.task_id // .data.id // empty' <<<"$response")
     echo "[PHOTO-API-DELETE-QUEUED] path=$oldpath id=$id task=${task:-unknown}"
