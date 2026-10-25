@@ -371,7 +371,7 @@ photo_api_cleanup_path() {
         fi
         echo "[PHOTO-API-DELETE-VERIFIED] path=$oldpath id=$id task=$task"
     fi
-    task=$(jq -r '.data.task_id // .data.id // empty' <<<"$response")
+    task=$(jq -r '.data.task_info.id // .data.task_id // .data.id // empty' <<<"$response")
     echo "[PHOTO-API-DELETE-QUEUED] path=$oldpath id=$id task=${task:-unknown}"
 }
 
