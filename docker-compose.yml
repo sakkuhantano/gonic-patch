@@ -1,0 +1,48 @@
+#version: '3.8'
+
+services:
+  # ==========================================
+  # CONTAINER 1: Lighttpd Proxy & Tools
+  # ==========================================
+  aio-tools:
+    build: .
+    container_name: ubuntu-services
+    image: ubuntu-services
+    restart: always
+    network_mode: host
+    privileged: true
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    #entrypoint: ["/usr/local/bin/container-start.sh"]
+    stop_grace_period: 120s
+    devices:
+      - /dev/kvm:/dev/kvm
+    # AKTIFKAN SYSCTL LANGSUNG DARI DOCKER COMPOSE:
+    # sysctls:
+      # - net.ipv4.ip_forward=1
+    volumes:
+      # Configs & Logs
+      - /share/CACHEDEV3_DATA/Public/container/configs/nginx:/etc/nginx
+      - /share/CACHEDEV3_DATA/Public/container/configs/adguard:/opt/AdGuardHome/config
+      - /share/CACHEDEV3_DATA/Public/container/configs/adguard/data:/opt/AdGuardHome/data
+      - /share/CACHEDEV3_DATA/Public/container/configs/asterisk:/etc/asterisk
+      - /share/CACHEDEV3_DATA/Public/container/configs/aria2:/root/.aria2
+      - /share/CACHEDEV3_DATA/Public/container/configs/filebrowser:/config
+      - /share/CACHEDEV3_DATA/Public/Download:/home/download
+      - /share/CACHEDEV3_DATA/Public/container/configs/www:/var/www/html
+      - /share/CACHEDEV3_DATA/Public/container/logs:/var/log/app_logs
+      - /share/CACHEDEV3_DATA/Public/container/configs/gonic:/var/lib/gonic
+      - /share/CACHEDEV3_DATA/Public/container/scripts:/hostconfig
+      - /share/CACHEDEV3_DATA/Public/container/configs/slskd:/var/lib/slskd
+      
+      - /share/CACHEDEV3_DATA/Public/container/configs/supervisor/supervisord.conf:/etc/supervisor/conf.d/services.conf
+      - /share/CACHEDEV3_DATA/Public/container/configs/ssh:/root/.ssh
+      
+      # MULTI-FOLDER MOUNT BIND KE DALAM 1 FOLDER /media:
+      - /share/CACHEDEV2_DATA/MUSIC:/media/Music
+      - /share/CACHEDEV2_DATA/PHOTO:/media/Photo
+      - /share/CACHEDEV3_DATA/Public/container/dsm-storage:/dsm-storage
+      - /share/CACHEDEV1_DATA/Surveillance:/surveillance
+      - /share/CACHEDEV3_DATA/Public/container/bootloader:/bootloader
+
