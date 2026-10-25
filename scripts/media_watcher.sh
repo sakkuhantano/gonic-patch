@@ -1,5 +1,12 @@
 #!/bin/bash
 
+# Start each watcher run with clean logs. Supervisor has already opened these
+# files for stdout/stderr; truncate them before emitting startup messages.
+WATCHER_LOG_DIR="/var/log/app_logs"
+mkdir -p "$WATCHER_LOG_DIR"
+: > "$WATCHER_LOG_DIR/watcher_stdout.log"
+: > "$WATCHER_LOG_DIR/watcher_stderr.log"
+
 DSM_IP="192.168.10.3"
 DSM_USER="hendry"
 DSM_SYNOINDEX="/usr/syno/bin/synoindex"
