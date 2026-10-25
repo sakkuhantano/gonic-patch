@@ -814,7 +814,7 @@ RUN make install \
 RUN mkdir -p /var/run/sshd
 
 ARG SSH_ROOT_PASSWORD
-RUN if [ -n "\${SSH_ROOT_PASSWORD:-}" ]; then echo "root:\${SSH_ROOT_PASSWORD}" | chpasswd; else passwd -l root; fi
+RUN if [ -n "${SSH_ROOT_PASSWORD:-}" ]; then echo "root:${SSH_ROOT_PASSWORD}" | chpasswd; else passwd -l root; fi
 
 RUN sed -i \
     's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' \
