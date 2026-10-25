@@ -670,6 +670,7 @@ RUN apt-get update && apt-get install -y \
     fdisk \
     parted \
     curl \
+    git \
     nano \
     wget \
     net-tools \
@@ -698,6 +699,29 @@ RUN apt-get update && apt-get install -y \
     libgsm1-dev \
     && rm -rf /var/lib/apt/lists/*
 
+
+# ============================================================
+# AI CODING AGENTS: HERMES + HERDR
+# ============================================================
+# Persistent user data is mounted at /root/.hermes by docker-compose.
+ENV HERMES_HOME=/root/.hermes
+ENV PATH="/root/.local/bin:/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+RUN set -eux; \
+    mkdir -p /root/.hermes /workspace /usr/local/bin /etc/supervisor/conf.d; \
+    curl -fsSL https://hermes-agent.nousresearch.com/install.sh -o /tmp/install-hermes.sh; \
+    bash /tmp/install-hermes.sh --non-interactive --skip-browser --skip-computer-use; \
+    rm -f /tmp/install-hermes.sh; \
+    curl -fsSL https://herdr.dev/install.sh -o /tmp/install-herdr.sh; \
+    sh /tmp/install-herdr.sh; \
+    rm -f /tmp/install-herdr.sh; \
+    command -v hermes; \
+    command -v herdr
+
+COPY ai-setup.sh /usr/local/bin/ai-setup.sh
+COPY hermes-gateway-supervisor.sh /usr/local/bin/hermes-gateway-supervisor.sh
+COPY hermes-gateway.conf /etc/supervisor/conf.d/hermes-gateway.conf
+RUN chmod 0755 /usr/local/bin/ai-setup.sh /usr/local/bin/hermes-gateway-supervisor.sh
 
 # ============================================================
 # PHP 8.3
@@ -789,7 +813,8 @@ RUN make install \
 
 RUN mkdir -p /var/run/sshd
 
-RUN echo 'root:panda1208' | chpasswd
+ARG SSH_ROOT_PASSWORD
+RUN if [ -n "\${SSH_ROOT_PASSWORD:-}" ]; then echo "root:\${SSH_ROOT_PASSWORD}" | chpasswd; else passwd -l root; fi
 
 RUN sed -i \
     's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' \
