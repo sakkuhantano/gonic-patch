@@ -164,7 +164,7 @@ photo_api_wait_task() {
     }
 
     while (( elapsed < timeout_seconds )); do
-        response=$(photo_api_read_call 'SYNO.Foto.BackgroundTask.Info' 1 get_status \\
+        response=$(photo_api_read_call 'SYNO.Foto.BackgroundTask.Info' 1 get_status \
             --data-urlencode "id=[$task_id]") || {
             echo "[PHOTO-API-TASK-ERROR] cannot read status for task=$task_id" >&2
             return 1
@@ -279,12 +279,12 @@ photo_api_cleanup_path() {
             folder_offset=0
             folder_still_present=0
             while :; do
-                folder_verify=$(photo_api_read_call 'SYNO.FotoTeam.Browse.Folder' 2 list \\
-                    --data-urlencode "id=$folder_id" \\
-                    --data-urlencode 'limit=1000' \\
+                folder_verify=$(photo_api_read_call 'SYNO.FotoTeam.Browse.Folder' 2 list \
+                    --data-urlencode "id=$folder_id" \
+                    --data-urlencode 'limit=1000' \
                     --data-urlencode "offset=$folder_offset") || return 1
-                if jq -e --arg p "$oldpath" \\
-                    '.data.list[]? | select(.name == $p)' \\
+                if jq -e --arg p "$oldpath" \
+                    '.data.list[]? | select(.name == $p)' \
                     <<<"$folder_verify" >/dev/null; then
                     folder_still_present=1
                 fi
