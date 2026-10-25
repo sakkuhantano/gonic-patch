@@ -73,7 +73,7 @@ photo_api_read_call() {
         -b "$PHOTO_API_COOKIE" -c "$PHOTO_API_COOKIE" \
         "$DSM_API_URL/entry.cgi" --data-urlencode "api=$api" \
         --data-urlencode "version=$version" --data-urlencode "method=$method" \
-        --data-urlencode "SynoToken=$PHOTO_API_TOKEN" "$@") || return 1
+        --data-urlencode "SynoToken=$PHOTO_API_TOKEN" --data-urlencode "_sid=$PHOTO_API_SID" "$@") || return 1
     [[ "$(jq -r '.success // false' <<<"$response")" == "true" ]] || {
         echo "[PHOTO-API-ERROR] $api.$method failed: $(jq -c '.error // .' <<<"$response")" >&2; return 1; }
     printf '%s' "$response"
