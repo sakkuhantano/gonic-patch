@@ -52,14 +52,14 @@ photo_api_cleanup_path() {
     local oldpath="$1" is_dir="$2" listing ids id relpath parent filename relparent folder_listing folder_ids folder_id item_listing response task
     [[ -n "$PHOTO_API_COOKIE" ]] || photo_api_init || return 1
     if [[ "$is_dir" == "1" ]]; then
-        relpath="\${oldpath#/volume1/photo}"; relpath="\${relpath%/}"
+        relpath="${oldpath#/volume1/photo}"; relpath="${relpath%/}"
         listing=$(photo_api_call 'SYNO.FotoTeam.Browse.Folder' 2 list --data-urlencode 'limit=1000' --data-urlencode 'offset=0' --data-urlencode 'sort_by=name' --data-urlencode 'sort_direction=asc') || return 1
         ids=$(jq -c --arg p "$relpath" '[.data.list[]? | select((.["folder.name"] // .name // .public.folder.name // "") == $p) | (.["folder.id"] // .id // .folder_id // .public.folder.id)] | map(select(. != null)) | unique' <<<"$listing")
         [[ "$(jq 'length' <<<"$ids")" -eq 1 ]] || { echo "[PHOTO-API-ERROR] folder ID not unique for $oldpath: $ids; refusing delete" >&2; return 1; }
         id=$(jq -r '.[0]' <<<"$ids")
         response=$(photo_api_call 'SYNO.FotoTeam.BackgroundTask.File' 1 delete --data-urlencode 'item_id=[]' --data-urlencode "folder_id=[$id]") || return 1
     else
-        parent="\${oldpath%/*}"; filename="\${oldpath##*/}"; relparent="\${parent#/volume1/photo}"
+        parent="${oldpath%/*}"; filename="${oldpath##*/}"; relparent="${parent#/volume1/photo}"
         [[ -n "$relparent" ]] || relparent="/"
         folder_listing=$(photo_api_call 'SYNO.FotoTeam.Browse.Folder' 2 list --data-urlencode 'limit=1000' --data-urlencode 'offset=0' --data-urlencode 'sort_by=name' --data-urlencode 'sort_direction=asc') || return 1
         folder_ids=$(jq -c --arg p "$relparent" '[.data.list[]? | select((.["folder.name"] // .name // .public.folder.name // "") == $p) | (.["folder.id"] // .id // .folder_id // .public.folder.id)] | map(select(. != null)) | unique' <<<"$folder_listing")
@@ -72,7 +72,7 @@ photo_api_cleanup_path() {
         response=$(photo_api_call 'SYNO.FotoTeam.BackgroundTask.File' 1 delete --data-urlencode "item_id=[$id]" --data-urlencode 'folder_id=[]') || return 1
     fi
     task=$(jq -r '.data.task_id // .data.id // empty' <<<"$response")
-    echo "[PHOTO-API-DELETE-QUEUED] path=$oldpath id=$id task=\${task:-unknown}"
+    echo "[PHOTO-API-DELETE-QUEUED] path=$oldpath id=$id task=${task:-unknown}"
 }
 
 MONITOR_DIRS=(
@@ -86,10 +86,10 @@ MONITOR_DIRS=(
 IGNORE_DIR_NAMES=(
     "@eaDir"
     "@SSRECMETA"
-    '\\.@thumb'
-    '\\.@__thumb'
+    '\.@thumb'
+    '\.@__thumb'
     "@SynoResource"
-    '\\.thumbnails'
+    '\.thumbnails'
     "thumbnails"
     "thumbs"
 )
@@ -199,6 +199,14 @@ while IFS='|' read -r event filepath; do
             continue
             ;;
     esac
+
+    # Defensive metadata exclusion: inotifywait --exclude is not always reliable
+    # for events crossing the QNAP/DSM 9P mount. Never chmod, index, or delete Photos
+    # records for Synology thumbnail/metadata paths.
+    if [[ "$filepath" =~ (^|/)(@eaDir|@SSRECMETA|\.@thumb|\.@__thumb|@SynoResource|\.thumbnails|thumbnails|thumbs)(/|$) ]] ||
+       [[ "$filepath" =~ (^|/)(SYNOPHOTO[^/]*|\.DS_Store|[Tt]humbs\.db|desktop\.ini|\._[^/]*|[^/]*\.(thumb|thumbnail))$ ]]; then
+        continue
+    fi
 
     # Normalize permissions on DSM-created entries exposed through the QNAP bind mount.
     # Clear POSIX ACL entries when setfacl is available; chmod alone may not override
