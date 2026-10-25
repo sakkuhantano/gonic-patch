@@ -25,6 +25,10 @@ PHOTO_API_COOKIE=""
 PHOTO_API_TOKEN=""
 
 photo_api_init() {
+    # Do not leave a stale cookie/token marker after a failed login; the next
+    # cleanup attempt must authenticate again instead of using an empty token.
+    PHOTO_API_COOKIE=""
+    PHOTO_API_TOKEN=""
     [[ -n "$DSM_API_PASSWORD" ]] || { echo "[PHOTO-API-ERROR] Set DSM_API_PASSWORD or configure $DSM_API_CONFIG" >&2; return 1; }
     command -v curl >/dev/null 2>&1 || { echo "[PHOTO-API-ERROR] curl unavailable" >&2; return 1; }
     command -v jq >/dev/null 2>&1 || { echo "[PHOTO-API-ERROR] jq unavailable; cleanup fails closed" >&2; return 1; }
@@ -60,7 +64,7 @@ photo_api_cleanup_path() {
     [[ -n "$PHOTO_API_COOKIE" ]] || photo_api_init || return 1
     if [[ "$is_dir" == "1" ]]; then
         relpath="${oldpath#/volume1/photo}"; relpath="${relpath%/}"
-        listing=$(photo_api_call 'SYNO.FotoTeam.Browse.Folder' 2 list --data-urlencode 'limit=1000' --data-urlencode 'offset=0' --data-urlencode 'sort_by=name' --data-urlencode 'sort_direction=asc') || return 1
+        listing=$(photo_api_call 'SYNO.FotoTeam.Browse.Folder' 2 list --data-urlencode 'limit=1000' --data-urlencode 'offset=0') || return 1
         ids=$(jq -c --arg p "$relpath" '[.data.list[]? | select((.["folder.name"] // .name // .public.folder.name // "") == $p) | (.["folder.id"] // .id // .folder_id // .public.folder.id)] | map(select(. != null)) | unique' <<<"$listing")
         [[ "$(jq 'length' <<<"$ids")" -eq 1 ]] || { echo "[PHOTO-API-ERROR] folder ID not unique for $oldpath: $ids; refusing delete" >&2; return 1; }
         id=$(jq -r '.[0]' <<<"$ids")
@@ -68,7 +72,7 @@ photo_api_cleanup_path() {
     else
         parent="${oldpath%/*}"; filename="${oldpath##*/}"; relparent="${parent#/volume1/photo}"
         [[ -n "$relparent" ]] || relparent="/"
-        folder_listing=$(photo_api_call 'SYNO.FotoTeam.Browse.Folder' 2 list --data-urlencode 'limit=1000' --data-urlencode 'offset=0' --data-urlencode 'sort_by=name' --data-urlencode 'sort_direction=asc') || return 1
+        folder_listing=$(photo_api_call 'SYNO.FotoTeam.Browse.Folder' 2 list --data-urlencode 'limit=1000' --data-urlencode 'offset=0') || return 1
         folder_ids=$(jq -c --arg p "$relparent" '[.data.list[]? | select((.["folder.name"] // .name // .public.folder.name // "") == $p) | (.["folder.id"] // .id // .folder_id // .public.folder.id)] | map(select(. != null)) | unique' <<<"$folder_listing")
         [[ "$(jq 'length' <<<"$folder_ids")" -eq 1 ]] || { echo "[PHOTO-API-ERROR] parent folder not unique for $parent: $folder_ids; refusing delete" >&2; return 1; }
         folder_id=$(jq -r '.[0]' <<<"$folder_ids")
@@ -255,8 +259,9 @@ while IFS='|' read -r event filepath; do
         fi
         if [[ "$event" == *CLOSE_WRITE* || "$event" == *MOVED_TO* ||
               ( "$IS_DIR" -eq 1 && "$event" == *CREATE* ) ]]; then
+            printf -v REMOTE_PHOTO_INDEX_CMD 'sudo -n %q -t basic -i %q' "$DSM_PHOTO_INDEX" "$DSM_FILEPATH"
             if ! ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no \
-                "${DSM_USER}@${DSM_IP}" "\"$DSM_PHOTO_INDEX\" -t basic -i \"$DSM_FILEPATH\"" </dev/null; then
+                "${DSM_USER}@${DSM_IP}" "$REMOTE_PHOTO_INDEX_CMD" </dev/null; then
                 echo "[ERROR] synofoto basic gagal: $DSM_FILEPATH" >&2
             else
                 echo "[PHOTO-INDEX-BASIC] $DSM_FILEPATH"
