@@ -228,7 +228,15 @@ photo_api_folder_id_for_path() {
         done
 
         matches=$(jq -c 'unique' <<<"$all_matches") || return 1
-        [[ "$(jq 'length' <<<"$matches")" -eq 1 ]] || {
+        match_count=$(jq 'length' <<<"$matches") || return 1
+        if [[ "$match_count" -eq 0 ]]; then
+            # A MOVED_FROM event is delivered after the physical rename has
+            # happened. Photos may already have dropped the old folder from
+            # Browse.Folder, so signal "not found" separately from API errors.
+            echo "[PHOTO-API-FOLDER-NOT-FOUND] path=$current_path parent_id=$current_id" >&2
+            return 2
+        fi
+        [[ "$match_count" -eq 1 ]] || {
             echo "[PHOTO-API-ERROR] folder path component not unique: $current_path (parent ID $current_id, matches $matches)" >&2
             return 1
         }
@@ -251,7 +259,28 @@ photo_api_cleanup_path() {
 			rm -rf -- "${filepath}/@eaDir" && \
 				echo "[PHOTO-EADIR-CLEAN] ${filepath}/@eaDir"
 		fi	
-        id=$(photo_api_folder_id_for_path "$oldpath") || return 1
+        # MOVED_FROM arrives after the rename, so the old path may already
+        # be absent from Photos' folder listing. Retry briefly for index/API lag.
+        # If it remains absent, do not run parent basic_reindex: rescanning the
+        # renamed parent can recreate the old name as a ghost folder.
+        local resolve_rc resolve_attempt
+        id=""
+        for resolve_attempt in 1 2 3; do
+            if id=$(photo_api_folder_id_for_path "$oldpath"); then
+                break
+            else
+                resolve_rc=$?
+            fi
+            if [[ "$resolve_rc" -eq 2 ]]; then
+                sleep 1
+                continue
+            fi
+            return 1
+        done
+        if [[ -z "$id" ]]; then
+            echo "[PHOTO-API-FOLDER-ABSENT] old folder no longer listed by Photos; skipping delete and parent reindex: $oldpath"
+            return 0
+        fi
         [[ "$id" =~ ^[0-9]+$ ]] || {
             echo "[PHOTO-API-ERROR] invalid folder ID for $oldpath; refusing delete" >&2
             return 1
