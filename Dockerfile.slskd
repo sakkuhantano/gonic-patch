@@ -1,0 +1,70 @@
+# ============================================================
+# SLSKD SOURCE / WEB UI BUILD
+# ============================================================
+FROM node:22-alpine AS slskd-web
+
+ARG SLSKD_VERSION=0.26.0
+
+WORKDIR /src
+
+RUN apk add --no-cache \
+    git \
+    python3
+
+RUN git clone --depth 1 --branch ${SLSKD_VERSION} \
+    https://github.com/slskd/slskd.git .
+
+WORKDIR /src/src/web
+
+RUN npm ci --no-audit --no-fund
+
+WORKDIR /src
+
+COPY slskd-web.patch.py /tmp/slskd-web.patch.py
+
+RUN python3 /tmp/slskd-web.patch.py
+
+WORKDIR /src/src/web
+
+RUN npx eslint --fix \
+    src/components/Search/Detail/SearchDetail.jsx \
+    src/components/System/Info/index.jsx \
+    src/lib/application.js
+
+RUN npm run build
+
+
+# ============================================================
+# SLSKD BACKEND
+# ============================================================
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS slskd-backend
+
+WORKDIR /src
+
+COPY --from=slskd-web \
+    /src/ \
+    /src/
+
+RUN dotnet publish \
+    src/slskd/slskd.csproj \
+    -c Release \
+    -r linux-x64 \
+    --self-contained true \
+    -p:PublishSingleFile=true \
+    -p:DebugType=None \
+    -p:DebugSymbols=false \
+    -o /out/slskd
+
+
+# ============================================================
+# EXPORT
+# ============================================================
+FROM scratch
+
+COPY --from=slskd-backend \
+    /out/slskd/ \
+    /slskd/
+
+COPY --from=slskd-web \
+    /src/src/web/build/ \
+    /wwwroot/

@@ -1,0 +1,77 @@
+# ============================================================
+# UBUNTU-SERVICES MAIN IMAGE
+# ============================================================
+FROM local/ubuntu-services-base:22.04
+
+
+# ============================================================
+# GONIC
+# ============================================================
+
+COPY --from=local/gonic:0.22.0-patched \
+    /usr/local/bin/gonic \
+    /usr/local/bin/gonic
+	
+RUN chmod +x /usr/local/bin/gonic
+
+
+# ============================================================
+# SLSKD
+# ============================================================
+
+RUN mkdir -p \
+        /opt/slskd \
+        /var/lib/slskd \
+        /home/download/soulseek \
+    && useradd \
+        -u 1000 \
+        -g 100 \
+        -M \
+        -s /usr/sbin/nologin \
+        slskd \
+    && chown -R 1000:100 /var/lib/slskd
+
+
+# ------------------------------------------------------------
+# PATCHED BACKEND
+# ------------------------------------------------------------
+
+COPY --from=local/slskd:0.26.0-patched \
+    /slskd/ \
+    /opt/slskd/
+
+
+RUN chmod +x /opt/slskd/slskd
+
+
+# ------------------------------------------------------------
+# PATCHED WEB UI
+# ------------------------------------------------------------
+
+RUN rm -rf /opt/slskd/wwwroot \
+    && mkdir -p /opt/slskd/wwwroot
+
+COPY --from=local/slskd:0.26.0-patched \
+    /wwwroot/ \
+    /opt/slskd/wwwroot/
+
+RUN chown -R 1000:100 /opt/slskd/wwwroot
+
+ENV SLSKD_APP_DIR=/var/lib/slskd
+
+
+# ============================================================
+# CONTAINER STARTUP
+# ============================================================
+
+COPY container-start.sh \
+    /usr/local/bin/container-start.sh
+
+RUN chmod +x /usr/local/bin/container-start.sh
+
+
+# ============================================================
+# ENTRYPOINT
+# ============================================================
+
+ENTRYPOINT ["/usr/local/bin/container-start.sh"]

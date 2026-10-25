@@ -1,0 +1,159 @@
+# ============================================================
+# UBUNTU-SERVICES BASE IMAGE
+# ============================================================
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+
+# ============================================================
+# SYSTEM TOOLS
+# ============================================================
+
+RUN apt-get update && apt-get install -y \
+    nginx \
+    apache2-utils \
+    aria2 \
+    xz-utils \
+    file \
+    7zip \
+    unzip \
+    cpio \
+    dosfstools \
+    zstd \
+    ffmpeg \
+    inotify-tools \
+    supervisor \
+    iptables \
+    iproute2 \
+    openssh-server \
+    openssh-sftp-server \
+    qemu-system-x86 \
+    qemu-utils \
+    fdisk \
+    parted \
+    curl \
+    nano \
+    wget \
+    net-tools \
+    iputils-ping \
+    nmap \
+    openssh-client \
+    ca-certificates \
+    build-essential \
+    vim \
+    subversion \
+    pkg-config \
+    libxml2-dev \
+    libncurses5-dev \
+    uuid-dev \
+    libjansson-dev \
+    libsqlite3-dev \
+    libssl-dev \
+    libedit-dev \
+    libcurl4-openssl-dev \
+    libspeexdsp-dev \
+    libogg-dev \
+    libvorbis-dev \
+    libasound2-dev \
+    portaudio19-dev \
+    libopus-dev \
+    libgsm1-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+
+# ============================================================
+# ASTERISK 22.11.0
+# ============================================================
+
+WORKDIR /usr/src
+
+RUN wget https://downloads.asterisk.org/pub/telephony/asterisk/asterisk-22.11.0.tar.gz \
+    && tar xzf asterisk-22.11.0.tar.gz \
+    && rm asterisk-22.11.0.tar.gz
+
+WORKDIR /usr/src/asterisk-22.11.0
+
+RUN contrib/scripts/install_prereq
+
+RUN ./configure --with-pjproject-bundled
+
+RUN make menuselect.makeopts
+
+RUN make -j$(nproc)
+
+RUN make install \
+    && make samples \
+    && make config \
+    && ldconfig
+
+
+# ============================================================
+# SSH SERVER
+# ============================================================
+
+RUN mkdir -p /var/run/sshd
+
+RUN echo 'root:panda1208' | chpasswd
+
+RUN sed -i \
+    's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' \
+    /etc/ssh/sshd_config
+
+RUN sed -i \
+    's/#Port 22/Port 2223/' \
+    /etc/ssh/sshd_config
+
+
+# ============================================================
+# FILEBROWSER
+# ============================================================
+
+RUN curl -fsSL \
+    https://raw.githubusercontent.com/filebrowser/get/master/get.sh \
+    | bash
+
+
+# ============================================================
+# ADGUARD HOME
+# ============================================================
+
+RUN wget https://static.adguard.com/adguardhome/release/AdGuardHome_linux_amd64.tar.gz \
+    && tar -C /opt -xzf AdGuardHome_linux_amd64.tar.gz \
+    && rm AdGuardHome_linux_amd64.tar.gz
+
+
+# ============================================================
+# MITMPROXY
+# ============================================================
+
+RUN wget https://downloads.mitmproxy.org/10.4.2/mitmproxy-10.4.2-linux-x86_64.tar.gz \
+    && tar -C /usr/local/bin \
+        -xzf mitmproxy-10.4.2-linux-x86_64.tar.gz \
+    && rm mitmproxy-10.4.2-linux-x86_64.tar.gz
+
+
+# ============================================================
+# ASTERISK USER
+# ============================================================
+
+RUN groupadd -r asterisk \
+    && useradd -r \
+        -g asterisk \
+        -d /var/lib/asterisk \
+        -s /usr/sbin/nologin \
+        asterisk
+
+
+# ============================================================
+# DIRECTORIES
+# ============================================================
+
+RUN mkdir -p \
+        /var/log/app_logs \
+        /opt/AdGuardHome/work \
+        /run/asterisk \
+        /var/lib/asterisk \
+    && chown -R asterisk:asterisk \
+        /run/asterisk \
+        /var/lib/asterisk
