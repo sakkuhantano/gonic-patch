@@ -152,6 +152,47 @@ photo_api_background_delete() {
     }
     printf '%s' "$response"
 }
+# Wait for Photos' asynchronous delete task to finish before considering a
+# folder rename/delete cleanup complete. BackgroundTask.File returns "waiting"
+# immediately; without polling, the old folder can remain visible in Photos.
+photo_api_wait_task() {
+    local task_id="$1" timeout_seconds="${2:-30}" response status elapsed=0
+
+    [[ "$task_id" =~ ^[0-9]+$ ]] || {
+        echo "[PHOTO-API-TASK-ERROR] invalid task ID: $task_id" >&2
+        return 1
+    }
+
+    while (( elapsed < timeout_seconds )); do
+        response=$(photo_api_read_call 'SYNO.Foto.BackgroundTask.Info' 1 get_status \\
+            --data-urlencode "id=[$task_id]") || {
+            echo "[PHOTO-API-TASK-ERROR] cannot read status for task=$task_id" >&2
+            return 1
+        }
+        status=$(jq -r --arg id "$task_id" \
+            '[.. | objects | select((.id? | tostring) == $id and (.status? | type) == "string") | .status][0] // empty' \
+            <<<"$response") || return 1
+
+        case "$status" in
+            done)
+                echo "[PHOTO-API-TASK-DONE] id=$task_id"
+                return 0
+                ;;
+            waiting|processing|aborting)
+                ;;
+            *)
+                echo "[PHOTO-API-TASK-ERROR] unexpected status for task=$task_id: ${response:0:1000}" >&2
+                return 1
+                ;;
+        esac
+        sleep 1
+        elapsed=$((elapsed + 1))
+    done
+
+    echo "[PHOTO-API-TASK-TIMEOUT] id=$task_id timeout=${timeout_seconds}s; task may still be running" >&2
+    return 1
+}
+
 photo_api_folder_id_for_path() {
     local fullpath="$1" relpath component current_path="" current_id=1
     local listing matches count offset page_matches all_matches
@@ -225,6 +266,40 @@ photo_api_cleanup_path() {
             return 1
         fi
         echo "[PHOTO-API-FOLDER-DELETE-TASK] id=$task status=$(jq -r '.data.task_info.status // "unknown"' <<<"$response")"
+
+        # Do not report success just because DSM accepted the task. Wait for
+        # completion, then verify the old folder name is absent from its parent.
+        photo_api_wait_task "$task" 30 || return 1
+        parent="${oldpath%/*}"
+        filename="${oldpath##*/}"
+        folder_id=$(photo_api_folder_id_for_path "$parent") || return 1
+        local folder_verify folder_count folder_still_present folder_attempt folder_offset
+        folder_still_present=1
+        for folder_attempt in 1 2 3; do
+            folder_offset=0
+            folder_still_present=0
+            while :; do
+                folder_verify=$(photo_api_read_call 'SYNO.FotoTeam.Browse.Folder' 2 list \\
+                    --data-urlencode "id=$folder_id" \\
+                    --data-urlencode 'limit=1000' \\
+                    --data-urlencode "offset=$folder_offset") || return 1
+                if jq -e --arg p "$oldpath" \\
+                    '.data.list[]? | select(.name == $p)' \\
+                    <<<"$folder_verify" >/dev/null; then
+                    folder_still_present=1
+                fi
+                folder_count=$(jq '.data.list | length' <<<"$folder_verify") || return 1
+                (( folder_count < 1000 )) && break
+                folder_offset=$((folder_offset + folder_count))
+            done
+            [[ "$folder_still_present" -eq 0 ]] && break
+            sleep 1
+        done
+        if [[ "$folder_still_present" -ne 0 ]]; then
+            echo "[PHOTO-API-VERIFY-ERROR] folder still listed after task completion: path=$oldpath id=$id task=$task" >&2
+            return 1
+        fi
+        echo "[PHOTO-API-FOLDER-DELETE-VERIFIED] path=$oldpath id=$id task=$task"
     else
 		parent="${filepath%/*}"
 		filename="${filepath##*/}"
