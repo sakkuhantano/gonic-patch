@@ -586,8 +586,11 @@ while IFS='|' read -r event filepath; do
 			fi
 			continue
 		fi
-		if [[ "$event" == *CLOSE_WRITE* || "$event" == *MOVED_TO* ||
-			  ( "$IS_DIR" -eq 1 && "$event" == *CREATE* ) ]]; then
+		# Do not index a directory on CREATE: users may rename it immediately,
+		# and Photos can process the queued index request after MOVED_FROM,
+		# resurrecting the old folder name. Index moved-in/renamed directories
+		# on MOVED_TO, and index newly written files on CLOSE_WRITE instead.
+		if [[ "$event" == *CLOSE_WRITE* || "$event" == *MOVED_TO* ]]; then
 			printf -v REMOTE_PHOTO_INDEX_CMD 'sudo -n %q -t basic -i %q' \
 				"$DSM_PHOTO_INDEX" "$DSM_FILEPATH"
 			if ! ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no \
