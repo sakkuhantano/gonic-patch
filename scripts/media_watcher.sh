@@ -411,7 +411,7 @@ while IFS='|' read -r event filepath; do
     # Defensive metadata exclusion: inotifywait --exclude is not always reliable
     # for events crossing the QNAP/DSM 9P mount. Never chmod, index, or delete Photos
     # records for Synology thumbnail/metadata paths.
-    if [[ "$filepath" =~ (^|/)(@eaDir|@SSRECMETA|\.@thumb|\.@__thumb|@SynoResource|\.thumbnails|thumbnails|thumbs)(/|$) ]] ||
+    if [[ "$filepath" =~ (^|/)(@eaDir|@Recycle|@SSRECMETA|\.@thumb|\.@__thumb|@SynoResource|\.thumbnails|thumbnails|thumbs)(/|$) ]] ||
        [[ "$filepath" =~ (^|/)(SYNOPHOTO[^/]*|\.DS_Store|[Tt]humbs\.db|desktop\.ini|\._[^/]*|[^/]*\.(thumb|thumbnail))$ ]]; then
         continue
     fi
