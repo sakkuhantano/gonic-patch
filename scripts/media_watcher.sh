@@ -26,45 +26,78 @@ PHOTO_API_SID=""
 PHOTO_API_TOKEN=""
 
 photo_api_init() {
-    # Do not leave a stale cookie/token marker after a failed login; the next
-    # cleanup attempt must authenticate again instead of using an empty token.
-    PHOTO_API_COOKIE=""
-    PHOTO_API_SID=""
-    PHOTO_API_TOKEN=""
     [[ -n "$DSM_API_PASSWORD" ]] || { echo "[PHOTO-API-ERROR] Set DSM_API_PASSWORD or configure $DSM_API_CONFIG" >&2; return 1; }
     command -v curl >/dev/null 2>&1 || { echo "[PHOTO-API-ERROR] curl unavailable" >&2; return 1; }
     command -v jq >/dev/null 2>&1 || { echo "[PHOTO-API-ERROR] jq unavailable; cleanup fails closed" >&2; return 1; }
+
     PHOTO_API_TMP=$(mktemp -d /tmp/media-watcher-api.XXXXXX) || return 1
     chmod 700 "$PHOTO_API_TMP"
     PHOTO_API_COOKIE="$PHOTO_API_TMP/cookies.txt"
+
     local login
-    login=$(curl -fsS --connect-timeout 10 --max-time 30 -c "$PHOTO_API_COOKIE" -b "$PHOTO_API_COOKIE" \
+    login=$(curl -fsS --connect-timeout 10 --max-time 30 \
+        -c "$PHOTO_API_COOKIE" -b "$PHOTO_API_COOKIE" \
         -X POST "$DSM_API_URL/auth.cgi" \
-        --data-urlencode 'api=SYNO.API.Auth' --data-urlencode 'version=6' --data-urlencode 'method=login' \
-        --data-urlencode "account=$DSM_API_USER" --data-urlencode "passwd=$DSM_API_PASSWORD" \
-        --data-urlencode 'session=SynologyPhotos' --data-urlencode 'format=sid' --data-urlencode 'enable_syno_token=yes') || {
-        echo "[PHOTO-API-ERROR] DSM login request failed" >&2; return 1; }
+        --data-urlencode 'api=SYNO.API.Auth' \
+        --data-urlencode 'version=6' \
+        --data-urlencode 'method=login' \
+        --data-urlencode "account=$DSM_API_USER" \
+        --data-urlencode "passwd=$DSM_API_PASSWORD" \
+        --data-urlencode 'session=SynologyPhotos' \
+        --data-urlencode 'format=cookie' \
+        --data-urlencode 'enable_syno_token=yes') || {
+        echo "[PHOTO-API-ERROR] DSM login request failed" >&2
+        return 1
+    }
+
     [[ "$(jq -r '.success // false' <<<"$login")" == "true" ]] || {
-        echo "[PHOTO-API-ERROR] DSM login rejected: $(jq -r '.error.code // "unknown"' <<<"$login")" >&2; return 1; }
-    PHOTO_API_SID=$(jq -r '.data.sid // empty' <<<"$login")
+        echo "[PHOTO-API-ERROR] DSM login rejected: $(jq -r '.error.code // "unknown"' <<<"$login")" >&2
+        return 1
+    }
+
     PHOTO_API_TOKEN=$(jq -r '.data.SynoToken // .data.synotoken // empty' <<<"$login")
-    [[ -n "$PHOTO_API_SID" ]] || { echo "[PHOTO-API-ERROR] SID missing" >&2; return 1; }
+    PHOTO_API_SID=$(jq -r '.data.sid // .data.Sid // empty' <<<"$login")
+
     [[ -n "$PHOTO_API_TOKEN" ]] || { echo "[PHOTO-API-ERROR] SynoToken missing" >&2; return 1; }
+    [[ -n "$PHOTO_API_SID" ]] || { echo "[PHOTO-API-ERROR] sid missing" >&2; return 1; }
 }
+
 photo_api_call() {
     local api="$1" version="$2" method="$3"
     shift 3
     local response
-    # JSON-format Photos POSTs authenticate with the SID in cookie "id".
-    # Do not send _sid as a form field; that is not the session cookie.
-    local token_json
-    token_json=$(jq -Rn --arg v "$PHOTO_API_TOKEN" '$v') || return 1
-    response=$(curl -fsS --connect-timeout 10 --max-time 45 -b "id=$PHOTO_API_SID" \
-        -X POST "$DSM_API_URL/entry.cgi" --data-urlencode "api=$api" \
-        --data-urlencode "version=$version" --data-urlencode "method=$method" \
-        --data-urlencode "SynoToken=$token_json" "$@") || return 1
+    response=$(curl -fsS --connect-timeout 10 --max-time 45 \
+        -b "$PHOTO_API_COOKIE" -c "$PHOTO_API_COOKIE" \
+        -X POST "$DSM_API_URL/entry.cgi" \
+        --data-urlencode "api=$api" \
+        --data-urlencode "version=$version" \
+        --data-urlencode "method=$method" \
+        --data-urlencode "SynoToken=$PHOTO_API_TOKEN" \
+        --data-urlencode "_sid=$PHOTO_API_SID" \
+        "$@") || return 1
+
+    # Session mati → re-login sekali lalu retry
+    if [[ "$(jq -r '.error.code // empty' <<<"$response")" == "119" ]]; then
+        echo "[PHOTO-API] session 119, re-login..." >&2
+        PHOTO_API_COOKIE=""
+        PHOTO_API_TOKEN=""
+        PHOTO_API_SID=""
+        photo_api_init || return 1
+        response=$(curl -fsS --connect-timeout 10 --max-time 45 \
+            -b "$PHOTO_API_COOKIE" -c "$PHOTO_API_COOKIE" \
+            -X POST "$DSM_API_URL/entry.cgi" \
+            --data-urlencode "api=$api" \
+            --data-urlencode "version=$version" \
+            --data-urlencode "method=$method" \
+            --data-urlencode "SynoToken=$PHOTO_API_TOKEN" \
+            --data-urlencode "_sid=$PHOTO_API_SID" \
+            "$@") || return 1
+    fi
+
     [[ "$(jq -r '.success // false' <<<"$response")" == "true" ]] || {
-        echo "[PHOTO-API-ERROR] $api.$method failed: $(jq -c '.error // .' <<<"$response")" >&2; return 1; }
+        echo "[PHOTO-API-ERROR] $api.$method failed: $(jq -c '.error // .' <<<"$response")" >&2
+        return 1
+    }
     printf '%s' "$response"
 }
 photo_api_read_call() {
@@ -135,14 +168,29 @@ photo_api_cleanup_path() {
     [[ -n "$PHOTO_API_COOKIE" ]] || photo_api_init || return 1
 
     if [[ "$is_dir" == "1" ]]; then
+		# kalau folder fisik sudah hilang, skip; kalau masih ada:
+		if [[ -d "${filepath}/@eaDir" ]]; then
+			rm -rf -- "${filepath}/@eaDir" && \
+				echo "[PHOTO-EADIR-CLEAN] ${filepath}/@eaDir"
+		fi	
         id=$(photo_api_folder_id_for_path "$oldpath") || return 1
         [[ "$id" =~ ^[0-9]+$ ]] || {
             echo "[PHOTO-API-ERROR] invalid folder ID for $oldpath; refusing delete" >&2
             return 1
         }
-        response=$(photo_api_call 'SYNO.FotoTeam.BackgroundTask.File' 1 delete \
-            --data-urlencode 'item_id=[]' --data-urlencode "folder_id=[$id]") || return 1
+		response=$(photo_api_call 'SYNO.FotoTeam.Browse.Folder' 1 delete \
+			--data-urlencode "id=[$id]") || return 1		
+        # response=$(photo_api_call 'SYNO.FotoTeam.BackgroundTask.File' 1 delete \
+            # --data-urlencode 'item_id=[]' --data-urlencode "folder_id=[$id]") || return 1
     else
+		parent="${filepath%/*}"
+		filename="${filepath##*/}"
+		eadir_entry="${parent}/@eaDir/${filename}"
+		if [[ -e "$eadir_entry" ]]; then
+			rm -rf -- "$eadir_entry" && \
+				echo "[PHOTO-EADIR-CLEAN] $eadir_entry" || \
+				echo "[PHOTO-EADIR-ERROR] gagal hapus $eadir_entry" >&2
+		fi	
         parent="${oldpath%/*}"
         filename="${oldpath##*/}"
         folder_id=$(photo_api_folder_id_for_path "$parent") || return 1
@@ -161,8 +209,11 @@ photo_api_cleanup_path() {
             echo "[PHOTO-API-ERROR] invalid item ID for $oldpath; refusing delete" >&2
             return 1
         }
-        response=$(photo_api_call 'SYNO.FotoTeam.BackgroundTask.File' 1 delete \
-            --data-urlencode "item_id=[$id]" --data-urlencode 'folder_id=[]') || return 1
+		response=$(photo_api_call 'SYNO.FotoTeam.Browse.Item' 1 delete \
+			--data-urlencode "id=[$id]") || return 1
+        # response=$(photo_api_call 'SYNO.FotoTeam.BackgroundTask.File' 1 delete \
+            # --data-urlencode "item_id=[$id]" --data-urlencode 'folder_id=[]') || return 1
+		echo "[PHOTO-API-DELETE-RESP] $response"
     fi
     task=$(jq -r '.data.task_id // .data.id // empty' <<<"$response")
     echo "[PHOTO-API-DELETE-QUEUED] path=$oldpath id=$id task=${task:-unknown}"
@@ -331,26 +382,37 @@ while IFS='|' read -r event filepath; do
         continue
     fi
 
-    if [[ "$filepath" == /media/Photo/* ]]; then
-        if [[ "$event" == *MOVED_FROM* || "$event" == *DELETE* ]]; then
-            echo "[PHOTO-API-DELETE] $DSM_FILEPATH"
-            if ! photo_api_cleanup_path "$DSM_FILEPATH" "$IS_DIR"; then
-                echo "[ERROR] Synology Photos cleanup failed; source not confirmed clean: $DSM_FILEPATH" >&2
-            fi
-            continue
-        fi
-        if [[ "$event" == *CLOSE_WRITE* || "$event" == *MOVED_TO* ||
-              ( "$IS_DIR" -eq 1 && "$event" == *CREATE* ) ]]; then
-            printf -v REMOTE_PHOTO_INDEX_CMD 'sudo -n %q -t basic -i %q' "$DSM_PHOTO_INDEX" "$DSM_FILEPATH"
-            if ! ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no \
-                "${DSM_USER}@${DSM_IP}" "$REMOTE_PHOTO_INDEX_CMD" </dev/null; then
-                echo "[ERROR] synofoto basic gagal: $DSM_FILEPATH" >&2
-            else
-                echo "[PHOTO-INDEX-BASIC] $DSM_FILEPATH"
-            fi
-        fi
-        continue
-    fi
+	if [[ "$filepath" == /media/Photo/* ]]; then
+		if [[ "$event" == *MOVED_FROM* || "$event" == *DELETE* ]]; then
+			echo "[PHOTO-API-DELETE] $DSM_FILEPATH"
+			if ! photo_api_cleanup_path "$DSM_FILEPATH" "$IS_DIR"; then
+				echo "[ERROR] Synology Photos cleanup failed: $DSM_FILEPATH" >&2
+				parent="${DSM_FILEPATH%/*}"
+				[[ -z "$parent" || "$parent" == "$DSM_FILEPATH" ]] && parent="/volume1/photo"
+				printf -v REMOTE_PHOTO_REINDEX_CMD 'sudo -n %q -t basic_reindex -i %q' \
+					"$DSM_PHOTO_INDEX" "$parent"
+				if ! ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no \
+					"${DSM_USER}@${DSM_IP}" "$REMOTE_PHOTO_REINDEX_CMD" </dev/null; then
+					echo "[PHOTO-REINDEX-ERROR] basic_reindex gagal: $parent" >&2
+				else
+					echo "[PHOTO-REINDEX] fallback basic_reindex $parent"
+				fi
+			fi
+			continue
+		fi
+		if [[ "$event" == *CLOSE_WRITE* || "$event" == *MOVED_TO* ||
+			  ( "$IS_DIR" -eq 1 && "$event" == *CREATE* ) ]]; then
+			printf -v REMOTE_PHOTO_INDEX_CMD 'sudo -n %q -t basic -i %q' \
+				"$DSM_PHOTO_INDEX" "$DSM_FILEPATH"
+			if ! ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no \
+				"${DSM_USER}@${DSM_IP}" "$REMOTE_PHOTO_INDEX_CMD" </dev/null; then
+				echo "[ERROR] synofoto basic gagal: $DSM_FILEPATH" >&2
+			else
+				echo "[PHOTO-INDEX-BASIC] $DSM_FILEPATH"
+			fi
+		fi
+		continue
+	fi
 
     # Keep existing Music indexing behavior unchanged.
     if [[ "$event" == *MOVED_FROM* || "$event" == *DELETE* ]]; then
