@@ -55,10 +55,14 @@ photo_api_call() {
     local api="$1" version="$2" method="$3"
     shift 3
     local response
-    response=$(curl -fsS --connect-timeout 10 --max-time 45 -b "$PHOTO_API_COOKIE" -c "$PHOTO_API_COOKIE" \
+    # JSON-format Photos POSTs authenticate with the SID in cookie "id".
+    # Do not send _sid as a form field; that is not the session cookie.
+    local token_json
+    token_json=$(jq -Rn --arg v "$PHOTO_API_TOKEN" '$v') || return 1
+    response=$(curl -fsS --connect-timeout 10 --max-time 45 -b "id=$PHOTO_API_SID" \
         -X POST "$DSM_API_URL/entry.cgi" --data-urlencode "api=$api" \
         --data-urlencode "version=$version" --data-urlencode "method=$method" \
-        --data-urlencode "SynoToken=$PHOTO_API_TOKEN" --data-urlencode "_sid=$PHOTO_API_SID" "$@") || return 1
+        --data-urlencode "SynoToken=$token_json" "$@") || return 1
     [[ "$(jq -r '.success // false' <<<"$response")" == "true" ]] || {
         echo "[PHOTO-API-ERROR] $api.$method failed: $(jq -c '.error // .' <<<"$response")" >&2; return 1; }
     printf '%s' "$response"
