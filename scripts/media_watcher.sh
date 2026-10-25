@@ -115,6 +115,43 @@ photo_api_read_call() {
         echo "[PHOTO-API-ERROR] $api.$method failed: $(jq -c '.error // .' <<<"$response")" >&2; return 1; }
     printf '%s' "$response"
 }
+
+# BackgroundTask.File is a JSON-format Photos API. Its write token is sent in
+# the X-SYNO-TOKEN header (the normal Browse.Item endpoint above tolerates the
+# legacy form parameter, but BackgroundTask.File can reject that with error 119).
+photo_api_background_delete() {
+    local response api='SYNO.FotoTeam.BackgroundTask.File'
+    local item_ids="$1" folder_ids="$2"
+
+    local request
+    request() {
+        curl -fsS --connect-timeout 10 --max-time 45 \
+            -b "$PHOTO_API_COOKIE" -c "$PHOTO_API_COOKIE" \
+            -H "X-SYNO-TOKEN: $PHOTO_API_TOKEN" \
+            -X POST "$DSM_API_URL/entry.cgi" \
+            --data-urlencode "api=$api" \
+            --data-urlencode 'version=1' \
+            --data-urlencode 'method=delete' \
+            --data-urlencode "item_id=$item_ids" \
+            --data-urlencode "folder_id=$folder_ids" \
+            --data-urlencode "_sid=$PHOTO_API_SID"
+    }
+
+    response=$(request) || return 1
+    if [[ "$(jq -r '.error.code // empty' <<<"$response")" == "119" ]]; then
+        echo "[PHOTO-API] BackgroundTask.File returned 119; re-login and retry with X-SYNO-TOKEN" >&2
+        PHOTO_API_COOKIE=""
+        PHOTO_API_TOKEN=""
+        PHOTO_API_SID=""
+        photo_api_init || return 1
+        response=$(request) || return 1
+    fi
+    [[ "$(jq -r '.success // false' <<<"$response")" == "true" ]] || {
+        echo "[PHOTO-API-ERROR] $api.delete failed: $(jq -c '.error // .' <<<"$response")" >&2
+        return 1
+    }
+    printf '%s' "$response"
+}
 photo_api_folder_id_for_path() {
     local fullpath="$1" relpath component current_path="" current_id=1
     local listing matches count offset page_matches all_matches
@@ -209,11 +246,19 @@ photo_api_cleanup_path() {
             echo "[PHOTO-API-ERROR] invalid item ID for $oldpath; refusing delete" >&2
             return 1
         }
-        response=$(photo_api_call 'SYNO.FotoTeam.Browse.Item' 1 delete \
-            --data-urlencode "id=[$id]") || return 1
+        # Use the Photos background delete task. This endpoint requires the
+        # SynoToken write header; keep the synchronous Browse.Item delete only
+        # as a historical fallback, not the primary delete path.
+        response=$(photo_api_background_delete "[$id]" '[]') || return 1
         echo "[PHOTO-API-DELETE-RESP] $response"
+        task=$(jq -r '.data.task_info.id // empty' <<<"$response")
+        if [[ -z "$task" ]]; then
+            echo "[PHOTO-API-ERROR] BackgroundTask.File.delete succeeded without task_info.id: $response" >&2
+            return 1
+        fi
+        echo "[PHOTO-API-DELETE-TASK] id=$task status=$(jq -r '.data.task_info.status // "unknown"' <<<"$response")"
 
-        # DSM can return success even when Browse.Item delete did not remove
+        # Confirm the background task actually removed the item from the list.
         # the item. Read the parent folder back and verify the filename is gone.
         # If it remains, return failure so the caller runs scoped basic_reindex.
         local verify_offset verify_count verify_listing still_present attempt
@@ -242,7 +287,7 @@ photo_api_cleanup_path() {
             echo "[PHOTO-API-VERIFY-ERROR] delete returned success but item still listed: path=$oldpath id=$id" >&2
             return 1
         fi
-        echo "[PHOTO-API-DELETE-VERIFIED] path=$oldpath id=$id"
+        echo "[PHOTO-API-DELETE-VERIFIED] path=$oldpath id=$id task=$task"
     fi
     task=$(jq -r '.data.task_id // .data.id // empty' <<<"$response")
     echo "[PHOTO-API-DELETE-QUEUED] path=$oldpath id=$id task=${task:-unknown}"
