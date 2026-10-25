@@ -209,11 +209,40 @@ photo_api_cleanup_path() {
             echo "[PHOTO-API-ERROR] invalid item ID for $oldpath; refusing delete" >&2
             return 1
         }
-		response=$(photo_api_call 'SYNO.FotoTeam.Browse.Item' 1 delete \
-			--data-urlencode "id=[$id]") || return 1
-        # response=$(photo_api_call 'SYNO.FotoTeam.BackgroundTask.File' 1 delete \
-            # --data-urlencode "item_id=[$id]" --data-urlencode 'folder_id=[]') || return 1
-		echo "[PHOTO-API-DELETE-RESP] $response"
+        response=$(photo_api_call 'SYNO.FotoTeam.Browse.Item' 1 delete \
+            --data-urlencode "id=[$id]") || return 1
+        echo "[PHOTO-API-DELETE-RESP] $response"
+
+        # DSM can return success even when Browse.Item delete did not remove
+        # the item. Read the parent folder back and verify the filename is gone.
+        # If it remains, return failure so the caller runs scoped basic_reindex.
+        local verify_offset verify_count verify_listing still_present attempt
+        still_present=1
+        for attempt in 1 2 3; do
+            verify_offset=0
+            still_present=0
+            while :; do
+                verify_listing=$(photo_api_read_call 'SYNO.FotoTeam.Browse.Item' 7 list \
+                    --data-urlencode "folder_id=$folder_id" \
+                    --data-urlencode 'limit=1000' \
+                    --data-urlencode "offset=$verify_offset") || return 1
+                if jq -e --arg n "$filename" \
+                    '.data.list[]? | select(.filename == $n)' \
+                    <<<"$verify_listing" >/dev/null; then
+                    still_present=1
+                fi
+                verify_count=$(jq '.data.list | length' <<<"$verify_listing") || return 1
+                (( verify_count < 1000 )) && break
+                verify_offset=$((verify_offset + verify_count))
+            done
+            [[ "$still_present" -eq 0 ]] && break
+            sleep 1
+        done
+        if [[ "$still_present" -ne 0 ]]; then
+            echo "[PHOTO-API-VERIFY-ERROR] delete returned success but item still listed: path=$oldpath id=$id" >&2
+            return 1
+        fi
+        echo "[PHOTO-API-DELETE-VERIFIED] path=$oldpath id=$id"
     fi
     task=$(jq -r '.data.task_id // .data.id // empty' <<<"$response")
     echo "[PHOTO-API-DELETE-QUEUED] path=$oldpath id=$id task=${task:-unknown}"
