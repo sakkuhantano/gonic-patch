@@ -215,10 +215,16 @@ photo_api_cleanup_path() {
             echo "[PHOTO-API-ERROR] invalid folder ID for $oldpath; refusing delete" >&2
             return 1
         }
-		response=$(photo_api_call 'SYNO.FotoTeam.Browse.Folder' 1 delete \
-			--data-urlencode "id=[$id]") || return 1		
-        # response=$(photo_api_call 'SYNO.FotoTeam.BackgroundTask.File' 1 delete \
-            # --data-urlencode 'item_id=[]' --data-urlencode "folder_id=[$id]") || return 1
+        # Use the same authenticated Photos background-task endpoint as file
+        # deletion. Folder deletes require item_id=[] and folder_id=[ID].
+        response=$(photo_api_background_delete '[]' "[$id]") || return 1
+        echo "[PHOTO-API-FOLDER-DELETE-RESP] $response"
+        task=$(jq -r '.data.task_info.id // empty' <<<"$response")
+        if [[ -z "$task" ]]; then
+            echo "[PHOTO-API-ERROR] BackgroundTask.File folder delete succeeded without task_info.id: $response" >&2
+            return 1
+        fi
+        echo "[PHOTO-API-FOLDER-DELETE-TASK] id=$task status=$(jq -r '.data.task_info.status // "unknown"' <<<"$response")"
     else
 		parent="${filepath%/*}"
 		filename="${filepath##*/}"
