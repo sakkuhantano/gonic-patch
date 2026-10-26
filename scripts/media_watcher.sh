@@ -254,11 +254,26 @@ photo_api_cleanup_path() {
     [[ -n "$PHOTO_API_COOKIE" ]] || photo_api_init || return 1
 
     if [[ "$is_dir" == "1" ]]; then
-		# kalau folder fisik sudah hilang, skip; kalau masih ada:
-		if [[ -d "${filepath}/@eaDir" ]]; then
-			rm -rf -- "${filepath}/@eaDir" && \
-				echo "[PHOTO-EADIR-CLEAN] ${filepath}/@eaDir"
-		fi	
+        # On a whole-folder delete, clear only DSM-managed metadata that can
+        # prevent the SMB client from removing the now-empty directory.
+        # The file-delete branch below never removes its parent directory.
+        for metadata_dir in "${oldpath}/@eaDir" "${oldpath}/.@__thumb"; do
+            if [[ -d "$metadata_dir" ]]; then
+                if find "$metadata_dir" -mindepth 1 -depth -delete && rmdir -- "$metadata_dir" 2>/dev/null; then
+                    echo "[PHOTO-METADATA-DIR-CLEAN] $metadata_dir"
+                else
+                    echo "[PHOTO-METADATA-DIR-ERROR] failed to clean $metadata_dir" >&2
+                fi
+            fi
+        done
+        if [[ -d "$oldpath" ]]; then
+            if rmdir -- "$oldpath" 2>/dev/null; then
+                echo "[PHOTO-FOLDER-PHYSICAL-DELETE] $oldpath"
+            else
+                echo "[PHOTO-FOLDER-NOT-EMPTY] leaving directory in place because contents remain: $oldpath"
+            fi
+        fi
+
         # MOVED_FROM arrives after the rename, so the old path may already
         # be absent from Photos' folder listing. Retry briefly for index/API lag.
         # If it remains absent, do not run parent basic_reindex: rescanning the
