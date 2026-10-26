@@ -250,7 +250,7 @@ photo_api_folder_id_for_path() {
 }
 
 photo_api_cleanup_path() {
-    local oldpath="$1" is_dir="$2" id folder_id parent filename item_listing ids response task
+    local oldpath="$1" is_dir="$2" id folder_id parent filename item_listing ids response task eadir_entry thumb_dir thumb_name thumb_path
     [[ -n "$PHOTO_API_COOKIE" ]] || photo_api_init || return 1
 
     if [[ "$is_dir" == "1" ]]; then
