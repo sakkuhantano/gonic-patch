@@ -257,7 +257,8 @@ photo_api_cleanup_path() {
         # On a whole-folder delete, clear only DSM-managed metadata that can
         # prevent the SMB client from removing the now-empty directory.
         # The file-delete branch below never removes its parent directory.
-        for metadata_dir in "${oldpath}/@eaDir" "${oldpath}/.@__thumb"; do
+        # oldpath is the DSM API path; filepath is the actual local mount path.
+        for metadata_dir in "${filepath}/@eaDir" "${filepath}/.@__thumb"; do
             if [[ -d "$metadata_dir" ]]; then
                 if find "$metadata_dir" -mindepth 1 -depth -delete && rmdir -- "$metadata_dir" 2>/dev/null; then
                     echo "[PHOTO-METADATA-DIR-CLEAN] $metadata_dir"
@@ -266,11 +267,11 @@ photo_api_cleanup_path() {
                 fi
             fi
         done
-        if [[ -d "$oldpath" ]]; then
-            if rmdir -- "$oldpath" 2>/dev/null; then
-                echo "[PHOTO-FOLDER-PHYSICAL-DELETE] $oldpath"
+        if [[ -d "$filepath" ]]; then
+            if rmdir -- "$filepath" 2>/dev/null; then
+                echo "[PHOTO-FOLDER-PHYSICAL-DELETE] $filepath"
             else
-                echo "[PHOTO-FOLDER-NOT-EMPTY] leaving directory in place because contents remain: $oldpath"
+                echo "[PHOTO-FOLDER-NOT-EMPTY] leaving directory in place because contents remain: $filepath"
             fi
         fi
 
