@@ -636,14 +636,25 @@ while IFS='|' read -r event filepath; do
 		# resurrecting the old folder name. Index moved-in/renamed directories
 		# on MOVED_TO, and index newly written files on CLOSE_WRITE instead.
 		if [[ "$event" == *CLOSE_WRITE* || "$event" == *MOVED_TO* ]]; then
-			printf -v REMOTE_PHOTO_INDEX_CMD 'sudo -n %q -t basic -i %q' \
-				"$DSM_PHOTO_INDEX" "$DSM_FILEPATH"
-			if ! ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no \
-				"${DSM_USER}@${DSM_IP}" "$REMOTE_PHOTO_INDEX_CMD" </dev/null; then
-				echo "[ERROR] synofoto basic gagal: $DSM_FILEPATH" >&2
-			else
-				echo "[PHOTO-INDEX-BASIC] $DSM_FILEPATH"
-			fi
+            # Do not block the inotify reader on SSH/indexing. If a user deletes
+            # the file or folder immediately after creating/renaming it, a
+            # synchronous index call can delay DELETE events long enough for
+            # hidden DSM metadata to make the Windows folder delete fail.
+            (
+                sleep 0.5
+                if [[ ! -e "$filepath" ]]; then
+                    echo "[PHOTO-INDEX-SKIP-GONE] $DSM_FILEPATH"
+                    exit 0
+                fi
+                printf -v REMOTE_PHOTO_INDEX_CMD 'sudo -n %q -t basic -i %q' \
+                    "$DSM_PHOTO_INDEX" "$DSM_FILEPATH"
+                if ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no \
+                    "${DSM_USER}@${DSM_IP}" "$REMOTE_PHOTO_INDEX_CMD" </dev/null; then
+                    echo "[PHOTO-INDEX-BASIC] $DSM_FILEPATH"
+                else
+                    echo "[ERROR] synofoto basic gagal: $DSM_FILEPATH" >&2
+                fi
+            ) &
 		fi
 		continue
 	fi
