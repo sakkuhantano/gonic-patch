@@ -333,12 +333,42 @@ photo_api_cleanup_path() {
     else
 		parent="${filepath%/*}"
 		filename="${filepath##*/}"
+
+		# Remove only metadata belonging to this deleted photo. DSM stores
+		# per-photo data under @eaDir/<filename> and several thumbnail variants
+		# directly inside .@__thumb. Never use a broad wildcard that could touch
+		# thumbnails for other photos.
 		eadir_entry="${parent}/@eaDir/${filename}"
 		if [[ -e "$eadir_entry" ]]; then
-			rm -rf -- "$eadir_entry" && \
-				echo "[PHOTO-EADIR-CLEAN] $eadir_entry" || \
+			if rm -rf -- "$eadir_entry"; then
+				echo "[PHOTO-EADIR-CLEAN] $eadir_entry"
+			else
 				echo "[PHOTO-EADIR-ERROR] gagal hapus $eadir_entry" >&2
-		fi	
+			fi
+		fi
+
+		thumb_dir="${parent}/.@__thumb"
+		for thumb_name in "s2000${filename}" "s800${filename}" "s100${filename}" "default${filename}"; do
+			thumb_path="${thumb_dir}/${thumb_name}"
+			if [[ -e "$thumb_path" ]]; then
+				if rm -f -- "$thumb_path"; then
+					echo "[PHOTO-THUMB-CLEAN] $thumb_path"
+				else
+					echo "[PHOTO-THUMB-ERROR] gagal hapus $thumb_path" >&2
+				fi
+			fi
+		done
+
+		# Remove only empty metadata directories. In particular, do not rmdir
+		# the user's photo folder here: deleting its last photo must leave the
+		# folder itself intact.
+		if [[ -d "$thumb_dir" ]] && rmdir -- "$thumb_dir" 2>/dev/null; then
+			echo "[PHOTO-THUMB-DIR-CLEAN] $thumb_dir"
+		fi
+		if [[ -d "${parent}/@eaDir" ]] && rmdir -- "${parent}/@eaDir" 2>/dev/null; then
+			echo "[PHOTO-EADIR-DIR-CLEAN] ${parent}/@eaDir"
+		fi
+
         parent="${oldpath%/*}"
         filename="${oldpath##*/}"
         folder_id=$(photo_api_folder_id_for_path "$parent") || return 1
